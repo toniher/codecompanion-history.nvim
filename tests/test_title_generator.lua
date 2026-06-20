@@ -515,6 +515,92 @@ T["Content Handling"]["filters out context messages with _meta.tag and context.i
     eq(true, result.has_question) -- actual question must be used
 end
 
+-- ACP Adapter Tests
+T["ACP Adapter"] = new_set()
+
+T["ACP Adapter"]["skips title generation silently when chat adapter is ACP"] = function()
+    local result = child.lua([[
+        local TitleGenerator = require("codecompanion._extensions.history.title_generator")
+        local acp_gen = TitleGenerator.new({ auto_generate_title = true })
+
+        local adapter_request_called = false
+        acp_gen._make_adapter_request = function(self, chat, prompt, callback)
+            adapter_request_called = true
+            callback("Should not reach here")
+        end
+
+        local chat = {
+            opts = {},
+            adapter = { type = "acp" },
+            messages = {
+                { role = "user", content = "Hello" }
+            }
+        }
+
+        local titles = {}
+        local completed = false
+        acp_gen:generate(chat, function(title)
+            table.insert(titles, tostring(title))
+            completed = true
+        end)
+
+        vim.wait(500, function() return completed end)
+
+        return {
+            adapter_request_called = adapter_request_called,
+            title_count = #titles,
+            final_title = titles[1],
+        }
+    ]])
+
+    eq(false, result.adapter_request_called) -- _make_adapter_request must not be called
+    eq(1, result.title_count) -- exactly one callback (nil, no feedback flash)
+    eq("nil", result.final_title)
+end
+
+T["ACP Adapter"]["returns error when title_generation_opts.adapter is explicitly ACP"] = function()
+    local result = child.lua([[
+        local TitleGenerator = require("codecompanion._extensions.history.title_generator")
+        local adapters = require("codecompanion.adapters")
+
+        -- Stub adapters.resolve to return an ACP adapter
+        local orig_resolve = adapters.resolve
+        adapters.resolve = function(name)
+            return { type = "acp" }
+        end
+
+        local acp_gen = TitleGenerator.new({
+            auto_generate_title = true,
+            title_generation_opts = { adapter = "some-acp-adapter" },
+        })
+
+        local chat = {
+            opts = {},
+            adapter = { type = "acp" },
+            messages = {
+                { role = "user", content = "Hello" }
+            }
+        }
+
+        local got_error = nil
+        local got_title = "unset"
+        acp_gen:generate(chat, function(title, err)
+            got_title = tostring(title)
+            got_error = err
+        end)
+
+        adapters.resolve = orig_resolve
+
+        return {
+            got_title = got_title,
+            has_error = got_error ~= nil,
+        }
+    ]])
+
+    eq("nil", result.got_title)
+    eq(true, result.has_error)
+end
+
 -- Error Handling Tests
 T["Error Handling"] = new_set()
 

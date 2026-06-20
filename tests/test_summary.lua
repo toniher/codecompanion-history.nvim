@@ -940,6 +940,92 @@ T["Summary Object Creation"]["handles chat without title"] = function()
     eq(true, result.has_other_fields)
 end
 
+-- ACP Adapter Tests
+T["ACP Adapter"] = new_set()
+
+T["ACP Adapter"]["skips summary generation silently when chat adapter is ACP"] = function()
+    local result = child.lua([[
+        local SummaryGenerator = require("codecompanion._extensions.history.summary_generator")
+        local acp_gen = SummaryGenerator.new({ summary = { generation_opts = {} } })
+
+        local adapter_request_called = false
+        acp_gen._make_adapter_request = function(self, chat, system_prompt, user_prompt, callback)
+            adapter_request_called = true
+            callback("Should not reach here")
+        end
+
+        local chat = {
+            opts = { save_id = "test_acp" },
+            adapter = { type = "acp" },
+            messages = {
+                { role = "user", content = "Hello", opts = { visible = true } },
+                { role = "llm", content = "Hi there", opts = { visible = true } },
+                { role = "user", content = "Follow up", opts = { visible = true } },
+            }
+        }
+
+        local got_summary = "unset"
+        local got_error = "unset"
+        acp_gen:generate(chat, function(summary, err)
+            got_summary = tostring(summary)
+            got_error = tostring(err)
+        end)
+
+        return {
+            adapter_request_called = adapter_request_called,
+            got_summary = got_summary,
+            got_error = got_error,
+        }
+    ]])
+
+    eq(false, result.adapter_request_called)
+    eq("nil", result.got_summary)
+    eq("nil", result.got_error)
+end
+
+T["ACP Adapter"]["returns error when generation_opts.adapter is explicitly ACP"] = function()
+    local result = child.lua([[
+        local SummaryGenerator = require("codecompanion._extensions.history.summary_generator")
+        local adapters = require("codecompanion.adapters")
+
+        local orig_resolve = adapters.resolve
+        adapters.resolve = function(name)
+            return { type = "acp" }
+        end
+
+        local acp_gen = SummaryGenerator.new({
+            summary = { generation_opts = { adapter = "some-acp-adapter" } }
+        })
+
+        local chat = {
+            opts = { save_id = "test_acp_explicit" },
+            adapter = { type = "acp" },
+            messages = {
+                { role = "user", content = "Hello", opts = { visible = true } },
+                { role = "llm", content = "Hi there", opts = { visible = true } },
+                { role = "user", content = "Follow up", opts = { visible = true } },
+            }
+        }
+
+        local got_summary = "unset"
+        local got_error = nil
+        acp_gen:generate(chat, function(summary, err)
+            got_summary = tostring(summary)
+            got_error = err
+        end)
+
+        adapters.resolve = orig_resolve
+
+        return {
+            got_summary = got_summary,
+            has_error = got_error ~= nil,
+        }
+    ]])
+
+    eq("nil", result.got_summary)
+    eq(true, result.has_error)
+end
+
 -- Error Handling and Edge Cases Tests
 T["Error Handling"] = new_set()
 

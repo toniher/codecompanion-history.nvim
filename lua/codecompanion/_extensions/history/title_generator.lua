@@ -113,6 +113,26 @@ function TitleGenerator:generate(chat, callback, is_refresh)
         return callback(nil)
     end
 
+    -- Resolve the adapter that will be used so we can bail before showing feedback
+    local gen_opts = self.opts.title_generation_opts or {}
+    local resolved_adapter = chat.adapter and vim.deepcopy(chat.adapter)
+    if gen_opts.adapter then
+        resolved_adapter = require("codecompanion.adapters").resolve(gen_opts.adapter)
+    end
+    if resolved_adapter and resolved_adapter.type == "acp" then
+        if gen_opts.adapter then
+            -- User explicitly pointed title_generation_opts.adapter at an ACP adapter
+            return callback(
+                nil,
+                "ACP adapters are not supported for title generation. Configure `title_generation_opts.adapter` to use an HTTP-based adapter."
+            )
+        end
+        log:info(
+            "Title generation skipped: chat is using an ACP adapter. Set `title_generation_opts.adapter` to an HTTP-based adapter to enable it."
+        )
+        return callback(nil)
+    end
+
     -- Show appropriate feedback only after validation
     if is_refresh then
         callback("Refreshing title...")
@@ -232,12 +252,14 @@ function TitleGenerator:_make_adapter_request(chat, prompt, callback)
     if opts.adapter then
         adapter = adapters.resolve(opts.adapter)
     end
-    -- Early return for ACP adapters like gemini-cli or claude-code
     if adapter.type == "acp" then
-        return callback(
-            nil,
-            "ACP adapters are not supported for title generation. Configure `title_generation_opts.adapter` to use an HTTP-based adapter."
-        )
+        if opts.adapter then
+            return callback(
+                nil,
+                "ACP adapters are not supported for title generation. Configure `title_generation_opts.adapter` to use an HTTP-based adapter."
+            )
+        end
+        return callback(nil)
     end
     if opts.model then
         settings = schema.get_default(adapter, { model = opts.model })

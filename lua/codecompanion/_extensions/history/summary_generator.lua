@@ -42,6 +42,24 @@ function SummaryGenerator:generate(chat, callback)
         )
     end
 
+    -- Resolve the adapter that will be used so we can bail before doing work
+    local resolved_adapter = chat.adapter and vim.deepcopy(chat.adapter)
+    if self.generation_opts.adapter then
+        resolved_adapter = require("codecompanion.adapters").resolve(self.generation_opts.adapter)
+    end
+    if resolved_adapter and resolved_adapter.type == "acp" then
+        if self.generation_opts.adapter then
+            return callback(
+                nil,
+                "ACP adapters are not supported for summary generation. Configure `summary.generation_opts.adapter` to use an HTTP-based adapter."
+            )
+        end
+        log:info(
+            "Summary generation skipped: chat is using an ACP adapter. Set `summary.generation_opts.adapter` to an HTTP-based adapter to enable it."
+        )
+        return callback(nil)
+    end
+
     log:trace("Starting summary generation for chat: %s", chat.opts.save_id or "N/A")
 
     -- Extract and prepare conversation content inline
@@ -312,10 +330,13 @@ function SummaryGenerator:_make_adapter_request(chat, system_prompt, user_prompt
     end
 
     if adapter.type == "acp" then
-        return callback(
-            nil,
-            "ACP adapters are not supported for summary generation. Configure `summary.generation_opts.adapter` to use an HTTP-based adapter."
-        )
+        if opts.adapter then
+            return callback(
+                nil,
+                "ACP adapters are not supported for summary generation. Configure `summary.generation_opts.adapter` to use an HTTP-based adapter."
+            )
+        end
+        return callback(nil)
     end
 
     if opts.model then
