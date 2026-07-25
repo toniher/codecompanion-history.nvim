@@ -39,24 +39,38 @@ function Storage:clean_expired_chats()
     log:trace("Checking for expired chats (older than %d days)", self.expiration_days)
     local index = self:get_chats()
     local now = os.time()
-    local expired_count = 0
 
     -- Calculate expiration threshold in seconds
     local expiration_threshold = now - (self.expiration_days * 24 * 60 * 60)
 
-    -- Check each chat
+    -- Collect the expired ids first so the index is written once instead of per chat
+    local expired_ids = {}
     for id, chat_meta in pairs(index) do
         if chat_meta.updated_at and chat_meta.updated_at < expiration_threshold then
             log:trace("Deleting expired chat: %s (last updated: %s)", id, os.date("%Y-%m-%d", chat_meta.updated_at))
-            if self:delete_chat(id) then
-                expired_count = expired_count + 1
-            end
+            table.insert(expired_ids, id)
         end
     end
 
-    if expired_count > 0 then
-        log:debug("Cleaned up %d expired chats", expired_count)
+    if #expired_ids == 0 then
+        return
     end
+
+    for _, id in ipairs(expired_ids) do
+        local delete_result = utils.delete_file(self.chats_dir .. "/" .. id .. ".json")
+        if not delete_result.ok then
+            log:error("Failed to delete chat file: %s", delete_result.error)
+        end
+        index[id] = nil
+    end
+
+    local write_result = utils.write_json(self.index_path, vim.tbl_isempty(index) and vim.empty_dict() or index)
+    if not write_result.ok then
+        log:error("Failed to update index after cleanup: %s", write_result.error)
+        return
+    end
+
+    log:debug("Cleaned up %d expired chats", #expired_ids)
 end
 
 ---Get the base path of the storage

@@ -419,6 +419,162 @@ T["Delete Operations"]["handles missing save_id in deletion"] = function()
     eq(false, result.delete_success)
 end
 
+-- Expiration Cleanup Tests
+T["Expiration Cleanup"] = new_set()
+
+T["Expiration Cleanup"]["deletes only expired chats and their files"] = function()
+    local result = child.lua([[
+        local h = require("tests.helpers")
+        local day = 24 * 60 * 60
+
+        local old_chat = h.create_test_chat("test_expired_old")
+        old_chat.updated_at = os.time() - (10 * day)
+        local fresh_chat = h.create_test_chat("test_expired_fresh")
+        fresh_chat.updated_at = os.time() - 60
+
+        for _, chat in ipairs({ old_chat, fresh_chat }) do
+            test_storage:_save_chat_to_file(chat)
+            test_storage:_update_index_entry(chat)
+        end
+
+        test_storage.expiration_days = 7
+        test_storage:clean_expired_chats()
+
+        local index = test_storage:get_chats()
+        return {
+            old_in_index = index["test_expired_old"] ~= nil,
+            fresh_in_index = index["test_expired_fresh"] ~= nil,
+            old_file_exists = vim.fn.filereadable(test_storage.chats_dir .. "/test_expired_old.json") == 1,
+            fresh_file_exists = vim.fn.filereadable(test_storage.chats_dir .. "/test_expired_fresh.json") == 1,
+        }
+    ]])
+
+    eq(false, result.old_in_index)
+    eq(true, result.fresh_in_index)
+    eq(false, result.old_file_exists)
+    eq(true, result.fresh_file_exists)
+end
+
+T["Expiration Cleanup"]["writes the index once regardless of how many chats expire"] = function()
+    local result = child.lua([[
+        local h = require("tests.helpers")
+        local utils = require("codecompanion._extensions.history.utils")
+        local day = 24 * 60 * 60
+
+        for i = 1, 5 do
+            local chat = h.create_test_chat("test_expired_" .. i)
+            chat.updated_at = os.time() - (10 * day)
+            test_storage:_save_chat_to_file(chat)
+            test_storage:_update_index_entry(chat)
+        end
+
+        -- Count index writes performed by the cleanup pass only
+        local original_write_json = utils.write_json
+        local index_writes = 0
+        utils.write_json = function(path, data)
+            if path == test_storage.index_path then
+                index_writes = index_writes + 1
+            end
+            return original_write_json(path, data)
+        end
+
+        test_storage.expiration_days = 7
+        test_storage:clean_expired_chats()
+        utils.write_json = original_write_json
+
+        local Path = require("plenary.path")
+        return {
+            index_writes = index_writes,
+            remaining = vim.tbl_count(test_storage:get_chats()),
+            files_left = vim.fn.glob(test_storage.chats_dir .. "/*"),
+            index_content = vim.trim(Path:new(test_storage.index_path):read()),
+        }
+    ]])
+
+    eq(1, result.index_writes)
+    eq(0, result.remaining)
+    eq("", result.files_left)
+    -- Index must stay a JSON object, otherwise the next read sees an array
+    eq("{}", result.index_content)
+end
+
+T["Expiration Cleanup"]["does nothing when expiration is disabled"] = function()
+    local result = child.lua([[
+        local h = require("tests.helpers")
+        local chat = h.create_test_chat("test_no_expiry")
+        chat.updated_at = os.time() - (365 * 24 * 60 * 60)
+        test_storage:_save_chat_to_file(chat)
+        test_storage:_update_index_entry(chat)
+
+        test_storage.expiration_days = 0
+        test_storage:clean_expired_chats()
+
+        return {
+            still_in_index = test_storage:get_chats()["test_no_expiry"] ~= nil,
+            file_exists = vim.fn.filereadable(test_storage.chats_dir .. "/test_no_expiry.json") == 1,
+        }
+    ]])
+
+    eq(true, result.still_in_index)
+    eq(true, result.file_exists)
+end
+
+T["Expiration Cleanup"]["leaves the index untouched when nothing is expired"] = function()
+    local result = child.lua([[
+        local h = require("tests.helpers")
+        local utils = require("codecompanion._extensions.history.utils")
+
+        local chat = h.create_test_chat("test_fresh_only")
+        chat.updated_at = os.time()
+        test_storage:_save_chat_to_file(chat)
+        test_storage:_update_index_entry(chat)
+
+        local original_write_json = utils.write_json
+        local index_writes = 0
+        utils.write_json = function(path, data)
+            if path == test_storage.index_path then
+                index_writes = index_writes + 1
+            end
+            return original_write_json(path, data)
+        end
+
+        test_storage.expiration_days = 1
+        test_storage:clean_expired_chats()
+        utils.write_json = original_write_json
+
+        return {
+            index_writes = index_writes,
+            still_in_index = test_storage:get_chats()["test_fresh_only"] ~= nil,
+        }
+    ]])
+
+    eq(0, result.index_writes)
+    eq(true, result.still_in_index)
+end
+
+T["Expiration Cleanup"]["keeps chats whose index entry has no updated_at"] = function()
+    local result = child.lua([[
+        local h = require("tests.helpers")
+        local utils = require("codecompanion._extensions.history.utils")
+
+        local chat = h.create_test_chat("test_no_timestamp")
+        chat.updated_at = nil
+        test_storage:_save_chat_to_file(chat)
+        test_storage:_update_index_entry(chat)
+
+        test_storage.expiration_days = 1
+        test_storage:clean_expired_chats()
+
+        return {
+            still_in_index = test_storage:get_chats()["test_no_timestamp"] ~= nil,
+            file_exists = vim.fn.filereadable(test_storage.chats_dir .. "/test_no_timestamp.json") == 1,
+        }
+    ]])
+
+    eq(true, result.still_in_index)
+    eq(true, result.file_exists)
+end
+
 -- Last Chat Tests
 T["Last Chat"] = new_set()
 
