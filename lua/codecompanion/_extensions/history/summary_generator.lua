@@ -1,6 +1,7 @@
 local client = require("codecompanion.http")
 local log = require("codecompanion._extensions.history.log")
 local schema = require("codecompanion.schema")
+local utils = require("codecompanion._extensions.history.utils")
 
 local CONSTANTS = {
     STATUS_ERROR = "error",
@@ -118,13 +119,13 @@ function SummaryGenerator:_format_message_for_summary(msg)
     if msg.role == "user" then
         -- Include regular user messages
         if msg.opts and msg.opts.visible == true then
-            return "User: " .. (msg.content or "")
+            return "User: " .. utils.message_text(msg.content)
         end
 
         -- Include context items if enabled
         if self.generation_opts.include_references and msg.opts and (msg.opts.context_id or msg.opts.reference) then
             local context_id = msg.opts.context_id or msg.opts.reference
-            return "Context: " .. (context_id or "") .. "\n" .. (msg.content or "")
+            return "Context: " .. (context_id or "") .. "\n" .. utils.message_text(msg.content)
         end
 
         return nil
@@ -143,9 +144,9 @@ function SummaryGenerator:_format_message_for_summary(msg)
                 end
                 local tools_text = #tool_names > 0 and (" [Called tools: " .. table.concat(tool_names, ", ") .. "]")
                     or ""
-                return "Assistant: " .. (msg.content or "") .. tools_text
+                return "Assistant: " .. utils.message_text(msg.content) .. tools_text
             else
-                return "Assistant: " .. (msg.content or "")
+                return "Assistant: " .. utils.message_text(msg.content)
             end
         end
         return nil
@@ -155,7 +156,7 @@ function SummaryGenerator:_format_message_for_summary(msg)
     if msg.role == "tool" and msg.opts and msg.opts.tag == "tool_output" then
         if self.generation_opts.include_tool_outputs then
             -- Truncate very long tool outputs
-            local content = msg.content or ""
+            local content = utils.message_text(msg.content)
             if #content > 500 then
                 content = content:sub(1, 500) .. "... [truncated]"
             end
@@ -329,16 +330,6 @@ function SummaryGenerator:_make_adapter_request(chat, system_prompt, user_prompt
         adapter = require("codecompanion.adapters").resolve(opts.adapter)
     end
 
-    if adapter.type == "acp" then
-        if opts.adapter then
-            return callback(
-                nil,
-                "ACP adapters are not supported for summary generation. Configure `summary.generation_opts.adapter` to use an HTTP-based adapter."
-            )
-        end
-        return callback(nil)
-    end
-
     if opts.model then
         settings = schema.get_default(adapter, { model = opts.model })
     end
@@ -353,28 +344,44 @@ function SummaryGenerator:_make_adapter_request(chat, system_prompt, user_prompt
         }),
     }
 
+    --INFO: On HTTP errors the client invokes this callback twice: once with the error body as
+    -- `data` and once with `err` set. Guard so a chunk is only ever resolved once, otherwise
+    -- the recursive chunking in `_make_summary_request` would fan out into duplicate requests.
+    local has_finished = false
+    ---@param content string|nil
+    ---@param error_msg string|nil
+    local function finish(content, error_msg)
+        if has_finished then
+            return
+        end
+        has_finished = true
+        return callback(content, error_msg)
+    end
+
     client.new({ adapter = settings }):request(payload, {
         callback = function(err, data, _adapter)
-            if err and err.stderr ~= "{}" then
-                log:error("Summary generation error: %s", err.stderr)
-                return callback(nil, "Error while generating summary: " .. err.stderr)
+            local err_msg = utils.format_adapter_error(err)
+            if err_msg then
+                log:error("Summary generation error: %s", err_msg)
+                return finish(nil, "Error while generating summary: " .. err_msg)
             end
 
             if data then
                 local result = _adapter.handlers.chat_output(_adapter, data)
                 if result and result.status then
                     if result.status == CONSTANTS.STATUS_SUCCESS then
-                        local content = vim.trim(result.output.content or "")
+                        local content = vim.trim(utils.message_text(result.output and result.output.content))
                         log:trace("Successfully generated summary")
-                        return callback(content, nil)
+                        return finish(content, nil)
                     elseif result.status == CONSTANTS.STATUS_ERROR then
-                        log:error("Summary generation error: %s", result.output)
-                        return callback(nil, "Error while generating summary: " .. result.output)
+                        local output = utils.message_text(result.output, vim.inspect(result.output))
+                        log:error("Summary generation error: %s", output)
+                        return finish(nil, "Error while generating summary: " .. output)
                     end
                 end
             end
 
-            callback(nil, "Unknown error during summary generation")
+            finish(nil, "Unknown error during summary generation")
         end,
     }, {
         silent = true,

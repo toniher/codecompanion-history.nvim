@@ -28,14 +28,14 @@ This is a [CodeCompanion.nvim](https://codecompanion.olimorris.dev/) extension. 
 | File | Role |
 |------|------|
 | `init.lua` | Extension entry point. Creates the singleton `History` instance, registers Neovim autocommands and user commands, wires chat keymaps into `cc_config.interactions.chat.keymaps`. Exports the public API under `require("codecompanion").extensions.history`. |
-| `storage.lua` | Persistence layer. Maintains `{dir_to_save}/index.json` (lightweight metadata for all chats) and individual chat JSON files under `{dir_to_save}/chats/`. Also manages the summaries index at `{dir_to_save}/summaries/index.json`. Uses `plenary.path` for I/O. |
+| `storage.lua` | Persistence layer. Maintains `{dir_to_save}/index.json` (lightweight metadata for all chats) and individual chat JSON files under `{dir_to_save}/chats/`. Also manages the summaries index at `{dir_to_save}/summaries_index.json`, with summary content under `{dir_to_save}/summaries/`. Uses `plenary.path` for I/O. |
 | `title_generator.lua` | Async title generation via the chat's configured LLM adapter. Handles initial generation and periodic refreshes (`refresh_every_n_prompts`). Silently skips when the chat's native adapter is ACP (local model); surfaces an error via callback when the user explicitly configures an ACP adapter in `generation_opts.adapter`. |
 | `summary_generator.lua` | Chunked conversation summarization via LLM. Filters out noise (context messages, tool schemas) before summarizing. Same ACP adapter handling as `title_generator.lua`. |
 | `ui.lua` | Buffer-title management and summary indicator logic. Delegates history/summary browsing to pickers. |
 | `pickers/` | One file per picker backend: `telescope.lua`, `snacks.lua`, `fzf-lua.lua`, `default.lua`. `pickers/init.lua` auto-resolves which backend to use. |
 | `vectorcode.lua` | Optional VectorCode CLI integration. Indexes summaries for vector search and registers the `@memory` tool in CodeCompanion. |
 | `types.lua` | LuaLS type annotations shared across modules. |
-| `utils.lua` | Utilities: `fire()` for User autocmd events; `find_project_root()` (walks up from cwd looking for `.git`, `package.json`, etc.); file I/O helpers (`read_file`, `write_file`, `read_json`, `write_json`, `delete_file`); `get_editor_info()` for buffer state; `format_time`/`format_relative_time` for timestamps; `remove_functions` for JSON serialisation of chat data. |
+| `utils.lua` | Utilities: `fire()` for User autocmd events; `find_project_root()` (walks up from cwd looking for `.git`, `package.json`, etc.); file I/O helpers (`read_file`, `write_file`, `read_json`, `write_json`, `delete_file`); `get_editor_info()` for buffer state; `format_relative_time` for timestamps; `remove_functions` for JSON serialisation of chat data; `message_text()` to normalise message content that some adapters store as a table; `format_adapter_error()` to normalise HTTP client error payloads. |
 | `log.lua` | Logging wrapper; activated only when `enable_logging = true`. |
 
 ### Event-driven lifecycle
@@ -71,5 +71,7 @@ Test files and their coverage:
 | `test_title_generator.lua` | Title generation including ACP adapter skip/error cases |
 | `test_summary.lua` | Summary generation including ACP adapter skip/error cases |
 | `test_filtering.lua` | Project root detection, `cwd`/`project_root` capture on save, `get_chats`/`get_last_chat` filter functions |
-| `test_providers.lua` | Picker backend auto-resolution |
-| `test_setup.lua` | Extension initialisation, `:CodeCompanionHistory` command, keymap registration |
+| `test_providers.lua` | Picker backend auto-resolution, picker instance state isolation |
+| `test_setup.lua` | Extension initialisation, `:CodeCompanionHistory` command, keymap registration, repeat `setup()` calls |
+| `test_ui.lua` | Chat preview rendering: context items and non-string message content |
+| `test_utils.lua` | `message_text`, `format_adapter_error`, `format_relative_time` normalisation helpers |

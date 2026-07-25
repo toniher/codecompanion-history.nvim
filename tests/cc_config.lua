@@ -65,6 +65,9 @@ return {
                 command = { "node", "test-agent.js" },
                 roles = { user = "user", assistant = "assistant" },
             },
+            opts = {
+                show_presets = false,
+            },
         },
     },
     interactions = {
@@ -129,6 +132,7 @@ return {
             },
             opts = {
                 blank_prompt = "",
+                completion_provider = "default",
             },
         },
 
@@ -225,8 +229,17 @@ return {
         },
         diff = { enabled = false },
     },
+    --INFO: codecompanion.setup() iterates this unconditionally, so tests that do not
+    -- register an extension still need the key present
+    extensions = {},
     opts = {
         log_level = "TRACE",
         system_prompt = "default system prompt",
+        triggers = {
+            acp_slash_commands = "\\",
+            editor_context = "#",
+            slash_commands = "/",
+            tools = "@",
+        },
     },
 }

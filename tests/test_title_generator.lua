@@ -1006,4 +1006,157 @@ T["Title Refresh"]["refresh uses recent conversation context"] = function()
     eq(true, result.completed)
 end
 
+-- Adapter request tests
+--
+-- The other groups stub `_make_adapter_request` wholesale; these exercise the real
+-- method against a stubbed HTTP client, since that is where the terminal-callback
+-- and double-invocation handling lives.
+T["Adapter Request"] = new_set()
+
+---Build the child-side scaffolding: a stubbed `codecompanion.http` whose request
+---replays `invocations`, plus a freshly required (unmocked) TitleGenerator.
+---@param invocations string Lua source for a list of {err, data} pairs to replay
+---@return string
+local function adapter_request_harness(invocations)
+    return string.format(
+        [[
+        local fake_adapter = {
+            name = "fake",
+            type = "http",
+            handlers = {
+                chat_output = function(_, data)
+                    return data and data.parsed or nil
+                end,
+            },
+            map_schema_to_params = function()
+                return { opts = {} }
+            end,
+            map_roles = function(_, messages)
+                return messages
+            end,
+        }
+
+        local invocations = %s
+
+        -- Stub the client before requiring the generator, which captures it at load time
+        package.loaded["codecompanion.http"] = {
+            new = function()
+                return {
+                    request = function(_, _, actions)
+                        for _, invocation in ipairs(invocations) do
+                            actions.callback(invocation.err, invocation.data, fake_adapter)
+                        end
+                    end,
+                }
+            end,
+        }
+        package.loaded["codecompanion._extensions.history.title_generator"] = nil
+        local TitleGenerator = require("codecompanion._extensions.history.title_generator")
+
+        local generator = TitleGenerator.new({ auto_generate_title = true })
+        local chat = {
+            opts = { save_id = "1" },
+            settings = { model = "test-model" },
+            adapter = fake_adapter,
+        }
+
+        local calls = {}
+        generator:_make_adapter_request(chat, "Some prompt", function(title, error_msg)
+            table.insert(calls, { title = title or "<nil>", error_msg = error_msg or "<nil>" })
+        end)
+
+        return calls
+    ]],
+        invocations
+    )
+end
+
+T["Adapter Request"]["resolves the callback when the response has no usable status"] = function()
+    -- Otherwise the buffer stays stuck on the "Deciding title..." feedback forever
+    local calls = child.lua(adapter_request_harness([[{ { err = nil, data = { parsed = nil } } }]]))
+
+    eq(1, #calls)
+    eq("<nil>", calls[1].title)
+    eq("<nil>", calls[1].error_msg)
+end
+
+T["Adapter Request"]["resolves the callback when the response is empty"] = function()
+    local calls = child.lua(adapter_request_harness([[{ { err = nil, data = nil } }]]))
+
+    eq(1, #calls)
+    eq("<nil>", calls[1].title)
+end
+
+T["Adapter Request"]["returns the generated title on success"] = function()
+    local calls = child.lua(adapter_request_harness([[
+        { { err = nil, data = { parsed = { status = "success", output = { content = "  My Title  " } } } } }
+    ]]))
+
+    eq(1, #calls)
+    eq("My Title", calls[1].title)
+end
+
+T["Adapter Request"]["unwraps table content in a successful response"] = function()
+    local calls = child.lua(adapter_request_harness([[
+        { { err = nil, data = { parsed = { status = "success", output = { content = { content = "Nested" } } } } } }
+    ]]))
+
+    eq(1, #calls)
+    eq("Nested", calls[1].title)
+end
+
+T["Adapter Request"]["calls back once when the client reports an error after data"] = function()
+    -- On HTTP errors the client fires its callback twice: once with the body as
+    -- `data`, then again with `err` set. The caller must only see one result.
+    local calls = child.lua(adapter_request_harness([[
+        {
+            { err = nil, data = { parsed = { status = "success", output = { content = "My Title" } } } },
+            { err = { message = "500 error", stderr = { status = 500, body = "server exploded" } }, data = nil },
+        }
+    ]]))
+
+    eq(1, #calls)
+    eq("My Title", calls[1].title)
+end
+
+T["Adapter Request"]["handles a response table as the error payload"] = function()
+    -- Regression: this payload used to be concatenated into a notify message,
+    -- which raised "attempt to concatenate a table value"
+    local calls = child.lua(adapter_request_harness([[
+        {
+            {
+                err = { message = "429 error", stderr = { status = 429, body = '{"error":"rate limited"}' } },
+                data = nil,
+            },
+        }
+    ]]))
+
+    eq(1, #calls)
+    eq("<nil>", calls[1].title)
+end
+
+T["Adapter Request"]["ignores the empty stderr sentinel"] = function()
+    -- `stderr == "{}"` means "no error"; the response should still be parsed
+    local calls = child.lua(adapter_request_harness([[
+        {
+            {
+                err = { stderr = "{}" },
+                data = { parsed = { status = "success", output = { content = "Parsed Anyway" } } },
+            },
+        }
+    ]]))
+
+    eq(1, #calls)
+    eq("Parsed Anyway", calls[1].title)
+end
+
+T["Adapter Request"]["reports a string stderr from a streaming failure"] = function()
+    local calls = child.lua(adapter_request_harness([[
+        { { err = { stderr = "connection reset" }, data = nil } }
+    ]]))
+
+    eq(1, #calls)
+    eq("<nil>", calls[1].title)
+end
+
 return T

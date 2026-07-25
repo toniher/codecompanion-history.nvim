@@ -2,6 +2,7 @@ local client = require("codecompanion.http")
 local config = require("codecompanion.config")
 local log = require("codecompanion._extensions.history.log")
 local schema = require("codecompanion.schema")
+local utils = require("codecompanion._extensions.history.utils")
 
 local CONSTANTS = {
     STATUS_ERROR = "error",
@@ -35,7 +36,7 @@ function TitleGenerator:_count_user_messages(chat)
     end, chat.messages)
 
     local actual_user_messages = vim.tbl_filter(function(msg)
-        local has_content = msg.content and vim.trim(msg.content) ~= ""
+        local has_content = vim.trim(utils.message_text(msg.content)) ~= ""
         return has_content
             and not (msg.opts and msg.opts.tag)
             and not (msg.opts and (msg.opts.reference or msg.opts.context_id))
@@ -100,7 +101,7 @@ function TitleGenerator:generate(chat, callback, is_refresh)
     -- Filter relevant messages (both user and assistant, excluding tagged/reference messages)
     local relevant_messages = vim.tbl_filter(function(msg)
         -- Include user and assistant messages with actual content
-        local has_content = msg.content and vim.trim(msg.content) ~= ""
+        local has_content = vim.trim(utils.message_text(msg.content)) ~= ""
         local is_relevant_role = msg.role == config.constants.USER_ROLE or msg.role == config.constants.LLM_ROLE
         local not_tagged = not (msg.opts and (msg.opts.tag or msg.opts.reference or msg.opts.context_id))
             and not (msg._meta and msg._meta.tag)
@@ -152,7 +153,7 @@ function TitleGenerator:generate(chat, callback, is_refresh)
         for i = start_index, #relevant_messages do
             local msg = relevant_messages[i]
             local role_prefix = msg.role == config.constants.USER_ROLE and "User" or "Assistant"
-            local content = vim.trim(msg.content)
+            local content = vim.trim(utils.message_text(msg.content))
 
             -- Truncate individual message if too long
             if #content > 1000 then
@@ -178,7 +179,7 @@ function TitleGenerator:generate(chat, callback, is_refresh)
             return callback(nil)
         end
 
-        local content = vim.trim(first_user_msg.content)
+        local content = vim.trim(utils.message_text(first_user_msg.content))
 
         -- Truncate individual message if too long
         if #content > 1000 then
@@ -252,15 +253,6 @@ function TitleGenerator:_make_adapter_request(chat, prompt, callback)
     if opts.adapter then
         adapter = adapters.resolve(opts.adapter)
     end
-    if adapter.type == "acp" then
-        if opts.adapter then
-            return callback(
-                nil,
-                "ACP adapters are not supported for title generation. Configure `title_generation_opts.adapter` to use an HTTP-based adapter."
-            )
-        end
-        return callback(nil)
-    end
     if opts.model then
         settings = schema.get_default(adapter, { model = opts.model })
     end
@@ -271,12 +263,26 @@ function TitleGenerator:_make_adapter_request(chat, prompt, callback)
             { role = "user", content = prompt },
         }),
     }
+    --INFO: On HTTP errors the client invokes this callback twice: once with the error body as
+    -- `data` and once with `err` set. Guard so the caller only ever sees one terminal result.
+    local has_finished = false
+    ---@param title string|nil
+    ---@param error_msg string|nil
+    local function finish(title, error_msg)
+        if has_finished then
+            return
+        end
+        has_finished = true
+        return callback(title, error_msg)
+    end
+
     client.new({ adapter = settings }):request(payload, {
         callback = function(err, data, _adapter)
-            if err and err.stderr ~= "{}" then
-                log:error("Title generation error: %s", err.stderr)
-                vim.notify("Error while generating title: " .. err.stderr)
-                return callback(nil)
+            local err_msg = utils.format_adapter_error(err)
+            if err_msg then
+                log:error("Title generation error: %s", err_msg)
+                vim.notify("Error while generating title: " .. err_msg, vim.log.levels.WARN)
+                return finish(nil)
             end
             if data then
                 local result = nil
@@ -287,77 +293,25 @@ function TitleGenerator:_make_adapter_request(chat, prompt, callback)
                 end
                 if result and result.status then
                     if result.status == CONSTANTS.STATUS_SUCCESS then
-                        local title = vim.trim(result.output.content or "")
+                        local title = vim.trim(utils.message_text(result.output and result.output.content))
                         log:trace("Successfully generated title: %s", title)
-                        return callback(title)
+                        return finish(title)
                     elseif result.status == CONSTANTS.STATUS_ERROR then
-                        log:error("Title generation error: %s", result.output)
-                        vim.notify("Error while generating title: " .. result.output)
-                        return callback(nil)
+                        local output = utils.message_text(result.output, vim.inspect(result.output))
+                        log:error("Title generation error: %s", output)
+                        vim.notify("Error while generating title: " .. output, vim.log.levels.WARN)
+                        return finish(nil)
                     end
                 end
             end
+            -- No usable response: revert to the base title rather than leaving the
+            -- buffer stuck on the "Deciding title..." feedback.
+            log:debug("Title generation produced no usable response")
+            finish(nil)
         end,
     }, {
         silent = true,
     })
 end
-
--- ---Make request to Groq API
--- ---@private
--- ---@param prompt string The prompt for title generation
--- ---@param callback function Callback to receive the title
--- function TitleGenerator:_make_groq_request(prompt, callback)
--- 	-- Check for API key
--- 	local api_key = os.getenv("GROQ_API_KEY")
--- 	if not api_key then
--- 		vim.notify("GROQ_API_KEY environment variable not set", vim.log.levels.ERROR)
--- 		return callback(nil)
--- 	end
--- 	client.static.opts.post.default({
--- 		url = "https://api.groq.com/openai/v1/chat/completions",
--- 		headers = {
--- 			["Authorization"] = "Bearer " .. os.getenv("GROQ_API_KEY"),
--- 			["Content-Type"] = "application/json",
--- 		},
--- 		body = vim.json.encode({
--- 			messages = {
--- 				{ role = "user", content = prompt },
--- 			},
--- 			model = "llama-3.3-70b-versatile",
--- 		}),
--- 		callback = function(response)
--- 			vim.schedule(function()
--- 				if not response then
--- 					return callback(nil)
--- 				end
-
--- 				-- Handle HTTP errors
--- 				if response.status < 200 or response.status >= 300 then
--- 					vim.notify("Failed to generate title: " .. response.body, vim.log.levels.ERROR)
--- 					return callback(nil)
--- 				end
-
--- 				-- Parse response
--- 				local ok, data = pcall(vim.json.decode, response.body)
--- 				if not ok or not data or not data.choices or not data.choices[1] or not data.choices[1].message then
--- 					vim.notify("Failed to generate title: Invalid response", vim.log.levels.ERROR)
--- 					return callback(nil)
--- 				end
-
--- 				-- Clean up title
--- 				local title = data.choices[1].message.content
--- 				title = title:gsub('"', ""):gsub("^%s*(.-)%s*$", "%1")
--- 				callback(title)
--- 			end)
--- 		end,
--- 		error = function(err)
--- 			vim.schedule(function()
--- 				vim.notify("Failed to generate title: " .. err, vim.log.levels.ERROR)
--- 				callback(nil)
--- 			end)
--- 		end,
--- 	})
--- end
 
 return TitleGenerator

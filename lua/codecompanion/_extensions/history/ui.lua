@@ -200,7 +200,7 @@ local function format_items(items_data, item_type, storage)
         end
         -- Sort items by generated_at in descending order
         table.sort(items, function(a, b)
-            return a.generated_at > b.generated_at
+            return (a.generated_at or 0) > (b.generated_at or 0)
         end)
     end
 
@@ -650,12 +650,9 @@ function UI:create_chat(chat_data)
                                     adapter
                                 )
                             )
+                            --INFO: We fall back to the adapter default rather than prompting for a
+                            -- model, because model opts differ between models and caused rare errors.
                             return _create_chat(adapter, nil)
-                            --INFO: this results in rare errors where the model opts differ from one model to another model.
-                            -- return self:_change_model(available_models, function(model)
-                            --     settings.model = model
-                            --     create_chat(adapter, nil)
-                            -- end)
                         end
                     end
                 end
@@ -687,6 +684,7 @@ function UI:_get_preview_lines(chat_data)
         if vim.tbl_isempty(context_items) then
             return
         end
+        local line_count_before_header = #lines
         table.insert(lines, "> Context:")
         local icons_path = config.display.chat.icons
         local icons = {
@@ -706,8 +704,9 @@ function UI:_get_preview_lines(chat_data)
             end
             ::continue::
         end
-        if #lines == 1 then
-            -- no context items added
+        if #lines == line_count_before_header + 1 then
+            -- every context item was hidden, so drop the header we optimistically added
+            table.remove(lines)
             return
         end
         table.insert(lines, "")
@@ -736,16 +735,9 @@ function UI:_get_preview_lines(chat_data)
                 end
 
                 local trimempty = not (msg.role == "user" and msg.content == "")
-                local display_content = msg.content or ""
                 --INFO: For anthropic adapter, the tool output is in content.content
-                if type(display_content) == "table" then
-                    if type(msg.content.content) == "string" then
-                        display_content = msg.content.content
-                    else
-                        display_content = "[Message Cannot Be Displayed]"
-                    end
-                end
-                for _, text in ipairs(vim.split(display_content or "", "\n", { plain = true, trimempty = trimempty })) do
+                local display_content = utils.message_text(msg.content, "[Message Cannot Be Displayed]")
+                for _, text in ipairs(vim.split(display_content, "\n", { plain = true, trimempty = trimempty })) do
                     table.insert(lines, text)
                 end
 
@@ -790,15 +782,6 @@ function UI:_get_preview_lines(chat_data)
     return lines
 end
 
----@param chat CodeCompanion.History.Chat
----@param saved_at number
-function UI:update_last_saved(chat, saved_at)
-    log:trace("Updating last saved time for chat: %s", chat.opts.save_id or "N/A")
-    --saved at icon
-    local icon = " "
-    self:update_chat_title(chat, icon .. utils.format_time(saved_at))
-end
-
 local function select_opts(prompt, conditional)
     return {
         prompt = prompt,
@@ -835,19 +818,6 @@ function UI:_change_adapter(on_select)
             --set chat settings to nil, so that old adapter's settings are not used
             on_select(selected, nil)
         end
-    end)
-end
-
----@param available_models string[]
----@param on_select fun(model: string):nil
-function UI:_change_model(available_models, on_select)
-    local models = vim.deepcopy(available_models)
-    table.sort(models)
-    vim.ui.select(models, select_opts("Select Model"), function(selected)
-        if not selected then
-            return
-        end
-        on_select(selected)
     end)
 end
 

@@ -1,33 +1,64 @@
 ---@diagnostic disable: deprecated
 local M = {}
 
-function M.remove_duplicates(list)
-    local seen = {}
-    local result = {}
-    for _, item in ipairs(list) do
-        if not seen[item] then
-            seen[item] = true
-            table.insert(result, item)
-        end
+---Extract text from a message's `content` field.
+---Some adapters (e.g. anthropic) store tool results as a table where the text
+---sits in `content.content`, so callers cannot assume a string.
+---@param content any The `content` field of a message
+---@param fallback? string Returned when content holds no extractable text
+---@return string
+function M.message_text(content, fallback)
+    if content == nil then
+        return ""
     end
-    return result
+    if type(content) == "string" then
+        return content
+    end
+    if type(content) == "table" and type(content.content) == "string" then
+        return content.content
+    end
+    return fallback or ""
 end
---- Format a Unix timestamp into a time string (HH:MM:SS).
----@param timestamp number Unix timestamp
----@return string Formatted time string in HH:MM:SS format
-function M.format_time(timestamp)
-    if type(timestamp) ~= "number" then
-        error("Invalid timestamp: expected a number")
+
+---Normalise an error payload from the CodeCompanion HTTP client into a message.
+---`err.stderr` is `"{}"` when there is no real error, a string for streaming
+---failures, and the raw response table for non-streaming HTTP errors.
+---@param err table|nil The error passed to a client request callback
+---@return string|nil message nil when the payload carries no actual error
+function M.format_adapter_error(err)
+    if not err then
+        return nil
     end
 
-    local formatted_time = os.date("%H:%M:%S", timestamp)
-    return tostring(formatted_time) -- Ensure the return type is explicitly a string
+    local stderr = err.stderr
+    if stderr == nil or stderr == "" or stderr == "{}" then
+        return nil
+    end
+    if type(stderr) == "string" then
+        return stderr
+    end
+    if type(stderr) == "table" then
+        -- Non-streaming errors carry the response table; the provider's message is in the body
+        if type(stderr.body) == "string" then
+            return stderr.body
+        end
+        local ok, encoded = pcall(vim.json.encode, stderr)
+        if ok then
+            return encoded
+        end
+    end
+
+    return vim.inspect(stderr)
 end
 
 -- Format timestamp to human readable relative time
----@param timestamp number Unix timestamp
+---@param timestamp number|nil Unix timestamp
 ---@return string Relative time string (e.g. "5m ago", "2h ago")
 function M.format_relative_time(timestamp)
+    if type(timestamp) ~= "number" then
+        return "?"
+    end
+
     local now = os.time()
     local diff = now - timestamp
 

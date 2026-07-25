@@ -20,9 +20,6 @@ local utils = require("codecompanion._extensions.history.utils")
 ---@class CodeCompanion.History.Chat : CodeCompanion.Chat
 ---@field opts CodeCompanion.History.ChatArgs
 
----@type CodeCompanion.History|nil
-local history_instance
-
 ---@type CodeCompanion.History.Opts
 local default_opts = {
     ---A name for the chat buffer that tells that this is a auto saving chat
@@ -395,9 +392,12 @@ end
 return {
     ---@param opts CodeCompanion.History.Opts
     setup = function(opts)
+        --INFO: Merge before the guard below; the vectorcode setup that follows reads `opts.memory`
+        -- on every call, including repeat calls (e.g. a config reload) that skip History.new.
+        opts = vim.tbl_deep_extend("force", default_opts, opts or {})
+
         if not history_instance then
             -- Initialize logging first
-            opts = vim.tbl_deep_extend("force", default_opts, opts or {})
             log.setup_logging(opts.enable_logging)
             history_instance = History.new(opts)
             log:debug("History extension setup successfully")
@@ -409,6 +409,7 @@ return {
             if vectorcode.opts.auto_create_memories_on_summary_generation then
                 vim.api.nvim_create_autocmd("User", {
                     pattern = "CodeCompanionHistorySummarySaved",
+                    group = vim.api.nvim_create_augroup("CodeCompanionHistoryMemory", { clear = true }),
                     callback = function(args)
                         if args.data.path then
                             vectorcode.vectorise(args.data.path)

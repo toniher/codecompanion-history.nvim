@@ -17,7 +17,9 @@ DefaultPicker.__index = DefaultPicker
 ---@return CodeCompanion.History.DefaultPicker
 function DefaultPicker:new(config)
     local base = setmetatable({}, self)
-    self.config = config
+    --INFO: Must be set on the instance, not on `self` (the class), otherwise every picker
+    -- shares one config and the item list outlives the picker that built it.
+    base.config = config
     return base
 end
 

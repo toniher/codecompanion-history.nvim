@@ -66,4 +66,44 @@ T["History module"]["should register keymap"] = function()
     eq(true, has_keymap)
 end
 
+-- Repeat setup (e.g. a config reload) must not throw or duplicate handlers
+T["Repeat setup"] = new_set()
+
+T["Repeat setup"]["tolerates being called again with sparse opts"] = function()
+    local result = child.lua([[
+        -- The memory branch is only reached when the VectorCode CLI is present
+        local vectorcode = require("codecompanion._extensions.history.vectorcode")
+        vectorcode.has_vectorcode = function()
+            return true
+        end
+
+        local extension = require("codecompanion._extensions.history")
+
+        -- Second call supplies no `memory` key at all, which used to be indexed directly
+        local ok_sparse, err_sparse = pcall(extension.setup, {
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-test",
+        })
+        -- And a third with no opts whatsoever
+        local ok_empty, err_empty = pcall(extension.setup)
+
+        local autocmds = vim.api.nvim_get_autocmds({
+            event = "User",
+            pattern = "CodeCompanionHistorySummarySaved",
+        })
+
+        return {
+            ok_sparse = ok_sparse,
+            err_sparse = tostring(err_sparse),
+            ok_empty = ok_empty,
+            err_empty = tostring(err_empty),
+            summary_autocmd_count = #autocmds,
+        }
+    ]])
+
+    eq(true, result.ok_sparse)
+    eq(true, result.ok_empty)
+    -- Repeat calls must not stack duplicate summary handlers
+    eq(1, result.summary_autocmd_count)
+end
+
 return T
