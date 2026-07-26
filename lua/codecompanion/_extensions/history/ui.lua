@@ -388,6 +388,29 @@ function UI:open_saved_chats(filter_fn)
                 end
             end)
         end,
+        ---@param chat_data CodeCompanion.History.ChatData
+        on_save_to_file = function(chat_data)
+            log:trace("Saving chat to file: %s", chat_data.save_id)
+            local raw_title = chat_data.title or chat_data.save_id or "chat"
+            local default_name = raw_title:gsub("[^%w%-_ ]", ""):gsub("%s+", "_") .. ".md"
+            vim.ui.input({ prompt = "Save chat to file: ", default = default_name }, function(path)
+                if not path or path == "" then
+                    return
+                end
+                local full_chat = self.storage:load_chat(chat_data.save_id)
+                if not full_chat then
+                    vim.notify("Failed to load chat content", vim.log.levels.ERROR)
+                    return
+                end
+                local lines = self:_get_preview_lines(full_chat)
+                local ok, err = pcall(vim.fn.writefile, lines, vim.fn.expand(path))
+                if ok then
+                    vim.notify("Chat saved to " .. vim.fn.expand(path), vim.log.levels.INFO)
+                else
+                    vim.notify("Failed to save chat: " .. tostring(err), vim.log.levels.ERROR)
+                end
+            end)
+        end,
     }, last_chat and last_chat.opts.save_id)
 end
 

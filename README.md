@@ -89,6 +89,7 @@ require("codecompanion").setup({
                     rename = { n = "r", i = "<M-r>" },
                     delete = { n = "d", i = "<M-d>" },
                     duplicate = { n = "<C-y>", i = "<C-y>" },
+                    save_to_file = { n = "e", i = "<M-e>" },
                 },
                 auto_generate_title = true,
                 title_generation_opts = {
@@ -164,6 +165,7 @@ require("codecompanion").setup({
 - `d` / `<M-d>` - Delete selected chat(s)
 - `r` / `<M-r>` - Rename selected chat
 - `<C-y>` - Duplicate selected chat
+- `e` / `<M-e>` - Save selected chat to file
 
 **Summary browser actions:**
 - `<CR>` - Add summary to current chat
