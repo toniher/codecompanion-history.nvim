@@ -34,61 +34,76 @@ function FzfluaPicker:browse()
         return cache[entry_str:match("^(.*)" .. nbsp)]
     end
 
+    local actions = {
+        enter = function(selections)
+            if #selections == 0 then
+                return
+            end
+            vim.iter(selections):map(decode):each(self.config.handlers.on_select)
+        end,
+        -- Rename item
+        [conv(self.config.keymaps.rename.i)] = function(selections)
+            if #selections == 0 then
+                return
+            end
+            if #selections > 1 then
+                return vim.notify(
+                    "Can rename only one " .. self:get_item_name_singular() .. " at a time",
+                    vim.log.levels.WARN
+                )
+            end
+
+            local selection = decode(selections[1])
+            self.config.handlers.on_rename(selection)
+        end,
+        -- Delete item
+        [conv(self.config.keymaps.delete.i)] = function(selections)
+            if #selections == 0 then
+                return
+            end
+
+            -- Extract chat data from selections
+            local chats_to_delete = {}
+            for _, selection in ipairs(selections) do
+                table.insert(chats_to_delete, decode(selection))
+            end
+
+            self.config.handlers.on_delete(chats_to_delete)
+        end,
+        -- Duplicate chat
+        [conv(self.config.keymaps.duplicate.i)] = function(selections)
+            if #selections == 0 then
+                return
+            end
+            if #selections > 1 then
+                return vim.notify("Can duplicate only one chat at a time", vim.log.levels.WARN)
+            end
+
+            local selection = decode(selections[1])
+            self.config.handlers.on_duplicate(selection)
+        end,
+    }
+    if self.config.keymaps.save_to_file and self.config.handlers.on_save_to_file then
+        actions[conv(self.config.keymaps.save_to_file.i)] = function(selections)
+            if #selections == 0 then
+                return
+            end
+            if #selections > 1 then
+                return vim.notify("Can save only one item at a time", vim.log.levels.WARN)
+            end
+
+            local selection = decode(selections[1])
+            self.config.handlers.on_save_to_file(selection)
+        end
+    end
+
     require("fzf-lua").fzf_exec(function(fzf_cb)
         vim.iter(self.config.items):map(format):each(fzf_cb)
         fzf_cb(nil)
     end, {
         fzf_opts = { ["--with-nth"] = "2..", ["--delimiter"] = string.format("[%s]", nbsp) },
         winopts = { title = self.config.title },
-        actions = {
-            enter = function(selections)
-                if #selections == 0 then
-                    return
-                end
-                vim.iter(selections):map(decode):each(self.config.handlers.on_select)
-            end,
-            -- Rename item
-            [conv(self.config.keymaps.rename.i)] = function(selections)
-                if #selections == 0 then
-                    return
-                end
-                if #selections > 1 then
-                    return vim.notify(
-                        "Can rename only one " .. self:get_item_name_singular() .. " at a time",
-                        vim.log.levels.WARN
-                    )
-                end
-
-                local selection = decode(selections[1])
-                self.config.handlers.on_rename(selection)
-            end,
-            -- Delete item
-            [conv(self.config.keymaps.delete.i)] = function(selections)
-                if #selections == 0 then
-                    return
-                end
-
-                -- Extract chat data from selections
-                local chats_to_delete = {}
-                for _, selection in ipairs(selections) do
-                    table.insert(chats_to_delete, decode(selection))
-                end
-
-                self.config.handlers.on_delete(chats_to_delete)
-            end,
-            -- Duplicate chat
-            [conv(self.config.keymaps.duplicate.i)] = function(selections)
-                if #selections == 0 then
-                    return
-                end
-                if #selections > 1 then
-                    return vim.notify("Can duplicate only one chat at a time", vim.log.levels.WARN)
-                end
-
-                local selection = decode(selections[1])
-                self.config.handlers.on_duplicate(selection)
-            end,
-        },
+        actions = actions,
         previewer = {
             _ctor = function()
                 local previewer = require("fzf-lua.previewer.builtin").base:extend()

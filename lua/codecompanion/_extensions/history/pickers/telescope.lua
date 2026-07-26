@@ -81,6 +81,19 @@ function TelescopePicker:browse()
                     self.config.handlers.on_duplicate(selection.value)
                 end
 
+                -- Function to save item to file
+                local save_to_file = function()
+                    local selection = action_state.get_selected_entry()
+                    if not selection then
+                        return
+                    end
+                    if not self.config.handlers.on_save_to_file then
+                        return
+                    end
+                    actions.close(prompt_bufnr)
+                    self.config.handlers.on_save_to_file(selection.value)
+                end
+
                 -- Select action
                 actions.select_default:replace(function()
                     local selection = action_state.get_selected_entry()
@@ -126,6 +139,20 @@ function TelescopePicker:browse()
                     silent = true,
                     nowait = true,
                 })
+
+                -- Save to file
+                if self.config.keymaps.save_to_file then
+                    vim.keymap.set({ "n" }, self.config.keymaps.save_to_file.n, save_to_file, {
+                        buffer = prompt_bufnr,
+                        silent = true,
+                        nowait = true,
+                    })
+                    vim.keymap.set({ "i" }, self.config.keymaps.save_to_file.i, save_to_file, {
+                        buffer = prompt_bufnr,
+                        silent = true,
+                        nowait = true,
+                    })
+                end
 
                 return true
             end,

@@ -547,6 +547,29 @@ function UI:open_summaries()
             log:trace("Selected summary: %s", summary_data.summary_id)
             self:_handle_summary_select(summary_data)
         end,
+        ---@param summary_data CodeCompanion.History.SummaryIndexData
+        on_save_to_file = function(summary_data)
+            log:trace("Saving summary to file: %s", summary_data.summary_id)
+            local raw_title = summary_data.chat_title or summary_data.chat_id or "summary"
+            local default_name = raw_title:gsub("[^%w%-_ ]", ""):gsub("%s+", "_") .. ".md"
+            vim.ui.input({ prompt = "Save summary to file: ", default = default_name }, function(path)
+                if not path or path == "" then
+                    return
+                end
+                local content = self.storage:load_summary(summary_data.summary_id)
+                if not content then
+                    vim.notify("Failed to load summary content", vim.log.levels.ERROR)
+                    return
+                end
+                local lines = vim.split(content, "\n", { plain = true })
+                local ok, err = pcall(vim.fn.writefile, lines, vim.fn.expand(path))
+                if ok then
+                    vim.notify("Summary saved to " .. vim.fn.expand(path), vim.log.levels.INFO)
+                else
+                    vim.notify("Failed to save summary: " .. tostring(err), vim.log.levels.ERROR)
+                end
+            end)
+        end,
     })
 end
 

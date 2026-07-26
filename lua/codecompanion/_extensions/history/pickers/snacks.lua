@@ -67,28 +67,46 @@ function SnacksPicker:browse()
                 picker:close()
                 self.config.handlers.on_duplicate(selection)
             end,
+            save_to_file = function(picker)
+                if not self.config.handlers.on_save_to_file then
+                    return
+                end
+                local selections = picker:selected({ fallback = true })
+                if #selections ~= 1 then
+                    return vim.notify("Can save only one item at a time", vim.log.levels.WARN)
+                end
+                local selection = selections[1]
+                picker:close()
+                self.config.handlers.on_save_to_file(selection)
+            end,
         },
 
         win = {
             input = {
-                keys = {
+                keys = vim.tbl_extend("force", {
                     [self.config.keymaps.delete.n] = { "delete_item", mode = "n" },
                     [self.config.keymaps.delete.i] = { "delete_item", mode = "i" },
                     [self.config.keymaps.rename.n] = { "rename_item", mode = "n" },
                     [self.config.keymaps.rename.i] = { "rename_item", mode = "i" },
                     [self.config.keymaps.duplicate.n] = { "duplicate_chat", mode = "n" },
                     [self.config.keymaps.duplicate.i] = { "duplicate_chat", mode = "i" },
-                },
+                }, self.config.keymaps.save_to_file and {
+                    [self.config.keymaps.save_to_file.n] = { "save_to_file", mode = "n" },
+                    [self.config.keymaps.save_to_file.i] = { "save_to_file", mode = "i" },
+                } or {}),
             },
             list = {
-                keys = {
+                keys = vim.tbl_extend("force", {
                     [self.config.keymaps.delete.n] = { "delete_item", mode = "n" },
                     [self.config.keymaps.delete.i] = { "delete_item", mode = "i" },
                     [self.config.keymaps.rename.n] = { "rename_item", mode = "n" },
                     [self.config.keymaps.rename.i] = { "rename_item", mode = "i" },
                     [self.config.keymaps.duplicate.n] = { "duplicate_chat", mode = "n" },
                     [self.config.keymaps.duplicate.i] = { "duplicate_chat", mode = "i" },
-                },
+                }, self.config.keymaps.save_to_file and {
+                    [self.config.keymaps.save_to_file.n] = { "save_to_file", mode = "n" },
+                    [self.config.keymaps.save_to_file.i] = { "save_to_file", mode = "i" },
+                } or {}),
             },
         },
     })

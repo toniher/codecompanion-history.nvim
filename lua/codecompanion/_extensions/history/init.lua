@@ -54,6 +54,10 @@ local default_opts = {
             n = "<C-y>",
             i = "<C-y>",
         },
+        save_to_file = {
+            n = "e",
+            i = "<M-e>",
+        },
     },
     ---Automatically generate titles for new chats
     auto_generate_title = true,
