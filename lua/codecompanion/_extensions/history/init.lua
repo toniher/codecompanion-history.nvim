@@ -4,6 +4,7 @@
 ---@field title_generator CodeCompanion.History.TitleGenerator
 ---@field ui CodeCompanion.History.UI
 ---@field should_load_last_chat boolean
+---@field memory_provider CodeCompanion.History.MemoryProvider?
 ---@field new fun(opts: CodeCompanion.History.Opts): CodeCompanion.History
 local History = {}
 local log = require("codecompanion._extensions.history.log")
@@ -93,11 +94,25 @@ local default_opts = {
     ---Enable detailed logging for history extension
     enable_logging = false,
     memory = {
+        ---Which memory backend to use ("vectorcode", "claude-mem", or nil to auto-resolve)
+        provider = nil,
         auto_create_memories_on_summary_generation = true,
         vectorcode_exe = "vectorcode",
         tool_opts = { default_num = 10 },
         notify = true,
         index_on_startup = false,
+        claude_mem = {
+            host = nil,
+            port = nil,
+            data_dir = nil,
+            timeout_ms = 5000,
+            project = nil,
+            search = "keyword",
+            inject_context_on_new_chat = false,
+            inject_limit = 5,
+            auto_start_worker = false,
+            auto_start_timeout_ms = 15000,
+        },
     },
     ---Filter function for browsing chats (defaults to show all chats)
     chat_filter = nil,
@@ -185,6 +200,8 @@ function History:_setup_autocommands()
 
             -- Check for existing summary and update indicator
             self.ui:check_and_update_summary_indicator(chat)
+
+            self:_maybe_inject_memory_context(chat)
 
             -- self:_subscribe_to_chat(chat)
         end),
@@ -292,6 +309,30 @@ function History:_setup_autocommands()
             self.ui:update_chat_title(chat)
         end),
     })
+end
+
+---Inject recent memory-provider context into a newly created chat, if opted in.
+---Failures here must never block chat creation.
+---@param chat CodeCompanion.History.Chat
+function History:_maybe_inject_memory_context(chat)
+    local provider = self.memory_provider
+    if not provider or not provider.get_context or not provider.wants_context_injection() then
+        return
+    end
+
+    local project_root = utils.find_project_root()
+    pcall(provider.get_context, project_root, function(context)
+        if context and context ~= "" then
+            pcall(
+                chat.add_context,
+                chat,
+                { content = context },
+                "claude-mem",
+                "claude-mem-recent-" .. project_root,
+                { visible = false }
+            )
+        end
+    end)
 end
 
 ---@param chat? CodeCompanion.History.Chat
@@ -403,27 +444,26 @@ return {
             log:debug("History extension setup successfully")
         end
 
-        local vectorcode = require("codecompanion._extensions.history.vectorcode")
-        if vectorcode.has_vectorcode() then
-            vectorcode.opts = vim.tbl_deep_extend("force", vectorcode.opts, opts.memory)
-            if vectorcode.opts.auto_create_memories_on_summary_generation then
+        local memory = require("codecompanion._extensions.history.memory")
+        local provider = memory.resolve(opts.memory)
+        history_instance.memory_provider = provider
+        if provider then
+            if opts.memory.auto_create_memories_on_summary_generation then
                 vim.api.nvim_create_autocmd("User", {
                     pattern = "CodeCompanionHistorySummarySaved",
                     group = vim.api.nvim_create_augroup("CodeCompanionHistoryMemory", { clear = true }),
                     callback = function(args)
-                        if args.data.path then
-                            vectorcode.vectorise(args.data.path)
-                        end
+                        provider.index(args.data.summary)
                     end,
                 })
             end
-            if vectorcode.opts.index_on_startup then
-                vectorcode.vectorise()
+            if opts.memory.index_on_startup then
+                provider.index()
             end
             local cc_config = require("codecompanion.config").config
             cc_config.interactions.chat.tools["memory"] = {
                 description = "Search from previous conversations saved in codecompanion-history.",
-                callback = vectorcode.make_memory_tool(opts.memory.tool_opts),
+                callback = provider.make_memory_tool(opts.memory.tool_opts),
             }
         end
     end,

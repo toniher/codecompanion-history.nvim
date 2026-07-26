@@ -36,9 +36,10 @@ A history management extension for [codecompanion.nvim](https://codecompanion.ol
 - **Summary browsing**: Dedicated browser with `gbs` to explore all summaries
 
 ### 🧠 Memory System (@memory tool)
-- **Vector-based search**: Uses VectorCode CLI to index and search through chat summaries
-- **Automatic indexing**: Optionally index summaries as they are generated
-- **Smart integration**: Available as `@memory` tool in new chats when VectorCode is installed
+- **Two selectable backends**: [VectorCode](https://github.com/Davidyz/VectorCode) (local vector search over chat summaries) or [claude-mem](https://github.com/thedotmack/claude-mem) (shared cross-session memory with Claude Code)
+- **Automatic indexing**: Optionally index/save summaries as they are generated
+- **Smart integration**: Available as `@memory` tool in new chats whenever a backend is detected
+- **Optional context injection**: With claude-mem, opt in to injecting recent cross-session context into new chats
 
 The following CodeCompanion features are preserved when saving and restoring chats:
 
@@ -71,7 +72,7 @@ When restoring a chat:
 
 - Neovim >= 0.8.0
 - [codecompanion.nvim](https://codecompanion.olimorris.dev/)
-- [VectorCode CLI](https://github.com/Davidyz/VectorCode) (optional, for `@memory` tool)
+- [VectorCode CLI](https://github.com/Davidyz/VectorCode) or [claude-mem](https://github.com/thedotmack/claude-mem) (optional, either backs the `@memory` tool)
 - [snacks.nvim](https://github.com/folke/snacks.nvim) (optional, for enhanced picker)
 - [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) (optional, for enhanced picker)
 - [fzf-lua](https://github.com/ibhagwan/fzf-lua) (optional, for enhanced picker)
@@ -162,9 +163,12 @@ require("codecompanion").setup({
                     },
                 },
                 
-                -- Memory system (requires VectorCode CLI)
+                -- Memory system (requires VectorCode CLI or claude-mem)
                 memory = {
-                    -- Automatically index summaries when they are generated
+                    -- Which backend to use: "vectorcode", "claude-mem", or nil to auto-resolve
+                    -- (auto-resolve prefers vectorcode, then claude-mem, whichever is available)
+                    provider = nil,
+                    -- Automatically index/save summaries when they are generated
                     auto_create_memories_on_summary_generation = true,
                     -- Path to the VectorCode executable
                     vectorcode_exe = "vectorcode",
@@ -178,6 +182,27 @@ require("codecompanion").setup({
                     -- Index all existing memories on startup
                     -- (requires VectorCode 0.6.12+ for efficient incremental indexing)
                     index_on_startup = false,
+                    -- Options specific to the claude-mem backend
+                    claude_mem = {
+                        host = nil, -- default: "127.0.0.1" (or $CLAUDE_MEM_WORKER_HOST / settings.json)
+                        port = nil, -- default: 37700 (or $CLAUDE_MEM_WORKER_PORT / settings.json)
+                        data_dir = nil, -- default: "~/.claude-mem" (or $CLAUDE_MEM_DATA_DIR)
+                        timeout_ms = 5000,
+                        -- Override how a project_root maps to a claude-mem project key
+                        -- (default: vim.fs.basename(project_root))
+                        project = nil,
+                        search = "keyword", -- "keyword" | "semantic" (semantic requires Chroma enabled in claude-mem)
+                        -- Inject claude-mem's recent context into every new chat (opt-in)
+                        inject_context_on_new_chat = false,
+                        inject_limit = 5,
+                        -- Try to start the claude-mem worker if it isn't reachable (opt-in).
+                        -- Looks for a global `claude-mem` binary on PATH first, then falls
+                        -- back to the newest claude-mem plugin installed under the Claude
+                        -- Code plugin cache. Safe to enable: starting an already-running
+                        -- worker is a no-op.
+                        auto_start_worker = false,
+                        auto_start_timeout_ms = 15000,
+                    },
                 },
             }
         }
@@ -244,14 +269,44 @@ Actions in summary browser:
 
 ## The `@memory` tool
 
-If you have installed the [VectorCode](https://github.com/Davidyz/VectorCode) CLI, 
-this plugin will use VectorCode to create an index for your chat summaries and create
-a tool called `@memory`. This tool gives the LLM the ability to search for
+The memory system has two selectable backends. Whichever one is detected creates
+a tool called `@memory` in new chats, giving the LLM the ability to search for
 (the summary of) previous chats so that you can refer to them in a new chat.
+Set `opts.memory.provider` to force one, or leave it `nil` to auto-resolve
+(VectorCode first, then claude-mem).
+
+### VectorCode backend
+
+If you have installed the [VectorCode](https://github.com/Davidyz/VectorCode) CLI,
+this plugin will use VectorCode to create an index for your chat summaries.
+
+### claude-mem backend
+
+If you use [claude-mem](https://github.com/thedotmack/claude-mem) with Claude Code, this
+plugin can talk to its local HTTP worker (default `127.0.0.1:37700`) instead:
+
+- Generated summaries are pushed to claude-mem via `POST /api/memory/save`, scoped to a
+  project key derived from `vim.fs.basename(project_root)` (override with `memory.claude_mem.project`).
+- The `@memory` tool searches claude-mem's observations (`keyword` search by default; set
+  `search = "semantic"` to use claude-mem's Chroma-backed semantic search instead, if enabled).
+- Optionally set `inject_context_on_new_chat = true` to have claude-mem's recent context for
+  the current project silently attached to every new chat.
+- This backend requires no CLI: availability is detected via `~/.claude-mem/claude-mem.db`
+  (or your configured `data_dir`), and the worker itself is normally started by Claude Code.
+  If the worker isn't running, the `@memory` tool reports a clear error instead of failing silently.
+- Set `auto_start_worker = true` to have the extension start the worker itself the first time
+  a request fails: it looks for a global `claude-mem` binary on PATH first (`claude-mem start`),
+  then falls back to the newest claude-mem plugin installed under the Claude Code plugin cache
+  (`node .../scripts/bun-runner.js .../scripts/worker-service.cjs start`). Starting an
+  already-running worker is a no-op, and this is only attempted once per Neovim session.
+- Since claude-mem's database is shared with your Claude Code sessions, saved CodeCompanion
+  summaries become visible there too (tagged `platform_source = "codecompanion"`).
 
 Available options for the memory submodule:
 ```lua
 opts.memory = {
+    -- "vectorcode" | "claude-mem" | nil to auto-resolve
+    provider = nil,
     auto_create_memories_on_summary_generation = true,
     -- path to the `vectorcode` executable
     vectorcode_exe = "vectorcode",
@@ -264,6 +319,19 @@ opts.memory = {
     -- whether to automatically update the index of all existing memories on startup
     -- (requires VectorCode 0.6.12+ for efficient incremental indexing)
     index_on_startup = false,
+    -- claude-mem-specific options
+    claude_mem = {
+        host = nil,
+        port = nil,
+        data_dir = nil,
+        timeout_ms = 5000,
+        project = nil, -- fun(project_root: string): string
+        search = "keyword", -- "keyword" | "semantic"
+        inject_context_on_new_chat = false,
+        inject_limit = 5,
+        auto_start_worker = false,
+        auto_start_timeout_ms = 15000,
+    },
 }
 ```
 
@@ -528,6 +596,7 @@ The extension integrates with CodeCompanion through a robust event-driven archit
 Special thanks to:
 - [Oli Morris](https://github.com/olimorris) for creating the amazing [CodeCompanion.nvim](https://codecompanion.olimorris.dev) plugin - a highly configurable and powerful coding assistant for Neovim.
 - [David](https://github.com/Davidyz) for the awesome [VectorCode](https://github.com/Davidyz/VectorCode) CLI and adding the @memory tool integration. 
+- [thedotmack](https://github.com/thedotmack) for [claude-mem](https://github.com/thedotmack/claude-mem), the cross-session memory backend this extension can share with Claude Code.
 
 ## 📄 License
 

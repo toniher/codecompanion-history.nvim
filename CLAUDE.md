@@ -33,7 +33,8 @@ This is a [CodeCompanion.nvim](https://codecompanion.olimorris.dev/) extension. 
 | `summary_generator.lua` | Chunked conversation summarization via LLM. Filters out noise (context messages, tool schemas) before summarizing. Same ACP adapter handling as `title_generator.lua`. |
 | `ui.lua` | Buffer-title management and summary indicator logic. Delegates history/summary browsing to pickers. |
 | `pickers/` | One file per picker backend: `telescope.lua`, `snacks.lua`, `fzf-lua.lua`, `default.lua`. `pickers/init.lua` auto-resolves which backend to use. |
-| `vectorcode.lua` | Optional VectorCode CLI integration. Indexes summaries for vector search and registers the `@memory` tool in CodeCompanion. |
+| `vectorcode.lua` | Optional VectorCode CLI integration (the underlying implementation). Indexes summaries for vector search and builds the `@memory` tool. Wrapped by `memory/vectorcode.lua`. |
+| `memory/` | Memory-provider abstraction, mirroring the `pickers/` auto-resolution pattern. `init.lua` resolves a provider (`opts.memory.provider`, or vectorcode-then-claude-mem auto-detection) via each provider's `setup()`/`is_available()`. `vectorcode.lua` shims the existing `history/vectorcode.lua`. `claude_mem.lua` talks to a local [claude-mem](https://github.com/thedotmack/claude-mem) HTTP worker over `curl`: builds the `@memory` tool (keyword/semantic search + id unfold), pushes generated summaries via `POST /api/memory/save`, and optionally fetches recent context for injection into new chats (`get_context`/`wants_context_injection`). When `claude_mem.auto_start_worker = true`, a failed request triggers one auto-start attempt per session (`_resolve_start_command`/`_start_worker`): a global `claude-mem` binary on PATH first, else the newest non-orphaned plugin version under the Claude Code plugin cache, invoked via `node bun-runner.js worker-service.cjs start`. |
 | `types.lua` | LuaLS type annotations shared across modules. |
 | `utils.lua` | Utilities: `fire()` for User autocmd events; `find_project_root()` (walks up from cwd looking for `.git`, `package.json`, etc.); file I/O helpers (`read_file`, `write_file`, `read_json`, `write_json`, `delete_file`); `get_editor_info()` for buffer state; `format_relative_time` for timestamps; `remove_functions` for JSON serialisation of chat data; `message_text()` to normalise message content that some adapters store as a table; `format_adapter_error()` to normalise HTTP client error payloads. |
 | `log.lua` | Logging wrapper; activated only when `enable_logging = true`. |
@@ -47,7 +48,7 @@ The extension does not monkey-patch CodeCompanion. It exclusively listens to Cod
 - `CodeCompanion*Finished` (`RequestFinished`, `ToolsFinished`) - saves chat state after LLM/tool response.
 - `CodeCompanionChatCleared` - optionally deletes the chat; resets `save_id` and title.
 
-The extension fires its own event `CodeCompanionHistorySummarySaved` (data: `{summary, path}`) when a summary is saved, which the VectorCode integration listens to for auto-indexing.
+The extension fires its own event `CodeCompanionHistorySummarySaved` (data: `{summary, path}`) when a summary is saved, which the resolved memory provider (`history_instance.memory_provider`) listens to for auto-indexing/saving.
 
 ### Chat identity
 
@@ -61,7 +62,7 @@ Individual chat files hold the full `ChatData` blob: message history, tool schem
 
 ### Testing conventions
 
-Test files are in `tests/`. Shared setup helpers live in `tests/helpers.lua` and `tests/cc_helpers.lua`. `tests/cc_config.lua` is the CodeCompanion config fixture used by `cc_helpers`. `tests/stubs/` holds additional fixture data (`chat_data.json`, `weather.lua`).
+Test files are in `tests/`. Shared setup helpers live in `tests/helpers.lua` and `tests/cc_helpers.lua`. `tests/cc_config.lua` is the CodeCompanion config fixture used by `cc_helpers`. `tests/stubs/` holds additional fixture data (`chat_data.json`, `weather.lua`, `claude_mem_*.json`).
 
 Test files and their coverage:
 
@@ -72,6 +73,8 @@ Test files and their coverage:
 | `test_summary.lua` | Summary generation including ACP adapter skip/error cases |
 | `test_filtering.lua` | Project root detection, `cwd`/`project_root` capture on save, `get_chats`/`get_last_chat` filter functions |
 | `test_providers.lua` | Picker backend auto-resolution, picker instance state isolation |
+| `test_memory_providers.lua` | Memory-provider auto-resolution (`memory/init.lua`), extension wiring (tool registration, repeat-`setup()` idempotency), context-injection helper (`History:_maybe_inject_memory_context`) |
+| `test_memory_claude_mem.lua` | claude-mem provider: config resolution, `is_available()`, `@memory` tool (search/unfold/error paths), `index()` save/backfill, `get_context()` |
 | `test_setup.lua` | Extension initialisation, `:CodeCompanionHistory` command, keymap registration, repeat `setup()` calls |
 | `test_ui.lua` | Chat preview rendering: context items and non-string message content |
 | `test_utils.lua` | `message_text`, `format_adapter_error`, `format_relative_time` normalisation helpers |

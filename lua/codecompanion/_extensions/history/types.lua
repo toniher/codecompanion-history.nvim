@@ -23,12 +23,26 @@
 ---@class CodeCompanion.History.MemoryTool.Opts
 ---@field default_num integer
 
+---@class CodeCompanion.History.ClaudeMemOpts
+---@field host? string Worker host (default: "127.0.0.1", or $CLAUDE_MEM_WORKER_HOST / settings.json)
+---@field port? number Worker port (default: 37700, or $CLAUDE_MEM_WORKER_PORT / settings.json)
+---@field data_dir? string claude-mem data directory (default: "~/.claude-mem", or $CLAUDE_MEM_DATA_DIR)
+---@field timeout_ms? number Request timeout in milliseconds (default: 5000)
+---@field project? fun(project_root: string): string Override for mapping project_root to a claude-mem project key
+---@field search? "keyword"|"semantic" Search mode used by the memory tool (default: "keyword")
+---@field inject_context_on_new_chat? boolean Inject recent claude-mem context into new chats (default: false)
+---@field inject_limit? number Number of recent context items to inject (default: 5)
+---@field auto_start_worker? boolean Try to start the claude-mem worker if it isn't reachable (default: false)
+---@field auto_start_timeout_ms? number Timeout for the auto-start command (default: 15000)
+
 ---@class CodeCompanion.History.MemoryOpts
+---@field provider? "vectorcode"|"claude-mem" Memory backend to use (nil to auto-resolve)
 ---@field auto_create_memories_on_summary_generation boolean Should vectorize summaries as they are created
 ---@field vectorcode_exe string VectorCode executable
 ---@field tool_opts CodeCompanion.History.MemoryTool.Opts
 ---@field notify boolean whether to enable notification
 ---@field index_on_startup boolean whether to perform indexing when this plugin is loaded.
+---@field claude_mem? CodeCompanion.History.ClaudeMemOpts Options specific to the claude-mem provider
 
 ---@class CodeCompanion.History.Opts
 ---@field default_buf_title? string A name for the chat buffer that tells that this is an auto saving chat

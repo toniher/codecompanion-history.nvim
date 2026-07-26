@@ -1,0 +1,8 @@
+[
+    {
+        "id": 42,
+        "title": "Refactored history extension",
+        "subtitle": "discovery",
+        "narrative": "Split init.lua's memory setup into a provider abstraction."
+    }
+]
