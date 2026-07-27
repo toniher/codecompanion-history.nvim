@@ -75,7 +75,7 @@ local default_opts = {
     ---Summary-related options
     summary = {
         ---Keymap to generate summary for current chat
-        create_summary_keymap = "gcs",
+        create_summary_keymap = "gm",
         ---Keymap to browse saved summaries
         browse_summaries_keymap = "gbs",
         ---Summary generation options
@@ -406,7 +406,7 @@ function History:_setup_keymaps()
             end,
         },
         ["Generate Summary"] = {
-            modes = form_modes(self.opts.summary and self.opts.summary.create_summary_keymap or "gcs"),
+            modes = form_modes(self.opts.summary and self.opts.summary.create_summary_keymap or "gm"),
             ---@diagnostic disable-next-line: undefined-field
             description = self.opts.generate_summary_keymap_description or "Generate Summary for Current Chat",
             callback = function(chat)

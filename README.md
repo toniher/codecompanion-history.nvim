@@ -18,7 +18,7 @@ A history management extension for [codecompanion.nvim](https://codecompanion.ol
 - Optional automatic chat expiration
 
 **Summary System**
-- Generate summaries for any chat (`gcs`)
+- Generate summaries for any chat (`gm`)
 - Browse all summaries (`gbs`)
 - Chunked summarization for large conversations
 - Configurable adapter, model, and system prompt
@@ -105,7 +105,7 @@ require("codecompanion").setup({
                 enable_logging = false,
 
                 summary = {
-                    create_summary_keymap = "gcs",
+                    create_summary_keymap = "gm",
                     browse_summaries_keymap = "gbs",
                     generation_opts = {
                         adapter = nil,
@@ -157,7 +157,7 @@ require("codecompanion").setup({
 **Chat buffer keymaps:**
 - `gh` - Open history browser
 - `sc` - Save current chat manually
-- `gcs` - Generate summary for current chat
+- `gm` - Generate summary for current chat
 - `gbs` - Browse saved summaries
 
 **History browser actions:**

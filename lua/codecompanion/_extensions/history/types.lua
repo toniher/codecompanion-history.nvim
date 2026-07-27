@@ -10,7 +10,7 @@
 ---@field format_title? fun(original_title: string):string a function that applies a custom transformation to the title.
 
 ---@class CodeCompanion.History.SummaryOpts
----@field create_summary_keymap? string | table Keymap to generate summary for current chat (default: "gcs")
+---@field create_summary_keymap? string | table Keymap to generate summary for current chat (default: "gm")
 ---@field browse_summaries_keymap? string | table Keymap to browse saved summaries (default: "gbs")
 ---@field generation_opts? CodeCompanion.History.SummaryGenerationOpts Options for summary generation
 
