@@ -201,29 +201,32 @@ end
 
 ---Attempt to start the claude-mem worker. Safe to call when it's already
 ---running (both the global CLI and the plugin's own script are idempotent).
+---Scheduled onto the main loop because `_resolve_start_command` uses Vimscript
+---functions (`vim.fn.expand`/`glob`/`executable`) that must not run in the fast
+---event context this is often invoked from (a `vim.system` `on_exit` callback).
 ---@param cb fun(started: boolean)
 function M._start_worker(cb)
-    local cmd = M._resolve_start_command()
-    if not cmd then
-        log:error(
-            "[claude-mem] auto_start_worker is enabled but no start command could be resolved "
-                .. "(no `claude-mem` on PATH and no installed plugin found under the Claude Code plugin cache)"
-        )
-        return cb(false)
-    end
-
-    if M.notify then
-        vim.schedule(function()
-            vim.notify("Starting claude-mem worker...", vim.log.levels.INFO, { title = "CodeCompanion-History" })
-        end)
-    end
-
-    vim.system(cmd, { timeout = M.opts.auto_start_timeout_ms }, function(out)
-        if out.code ~= 0 then
-            log:error("[claude-mem] failed to start worker (exit %s): %s", out.code, out.stderr)
+    vim.schedule(function()
+        local cmd = M._resolve_start_command()
+        if not cmd then
+            log:error(
+                "[claude-mem] auto_start_worker is enabled but no start command could be resolved "
+                    .. "(no `claude-mem` on PATH and no installed plugin found under the Claude Code plugin cache)"
+            )
             return cb(false)
         end
-        cb(true)
+
+        if M.notify then
+            vim.notify("Starting claude-mem worker...", vim.log.levels.INFO, { title = "CodeCompanion-History" })
+        end
+
+        vim.system(cmd, { timeout = M.opts.auto_start_timeout_ms }, function(out)
+            if out.code ~= 0 then
+                log:error("[claude-mem] failed to start worker (exit %s): %s", out.code, out.stderr)
+                return cb(false)
+            end
+            cb(true)
+        end)
     end)
 end
 
