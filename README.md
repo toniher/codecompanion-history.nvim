@@ -137,6 +137,10 @@ require("codecompanion").setup({
                         inject_limit = 5,
                         auto_start_worker = false,
                         auto_start_timeout_ms = 15000,
+                        prompts = {
+                            enabled = false, -- store each submitted prompt in claude-mem's user_prompts table
+                            max_chars = 4000,
+                        },
                     },
                 },
             }
@@ -183,6 +187,7 @@ Set `opts.memory.provider` to `"vectorcode"` or `"claude-mem"` to force a backen
 - Set `inject_context_on_new_chat = true` to silently attach recent context to every new chat.
 - Set `auto_start_worker = true` to have the extension start the worker automatically on first failed request.
 - The database is shared with Claude Code sessions; CodeCompanion summaries are tagged `platform_source = "codecompanion"`.
+- Set `prompts.enabled = true` to also store each submitted user prompt via `POST /api/import`, separate from summaries. This writes chat text into a database shared with Claude Code (and cloud-synced, if you use cmem.ai sync), so it defaults off. Stored prompts are searchable with the `@memory` tool by asking for `scope = "prompts"`. Prompts longer than `prompts.max_chars` (default 4000) are truncated; text is not semantically indexed the way `/api/sessions/init` would index it, so prompt search is keyword-only regardless of the `search` setting above.
 
 ## API
 

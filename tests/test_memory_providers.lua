@@ -145,6 +145,167 @@ T["Extension wiring"]["falls back gracefully when neither backend is available"]
     eq(true, result.ok)
 end
 
+T["Prompt capture"] = new_set()
+
+T["Prompt capture"]["saves the latest visible user prompt with its derived prompt_number"] = function()
+    local result = child.lua([[
+        local History = require("codecompanion._extensions.history").History
+        local history = History.new({
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-prompt-unit-test",
+            summary = {},
+        })
+
+        local captured = {}
+        history.memory_provider = {
+            wants_prompt_capture = function() return true end,
+            save_prompt = function(prompt_data)
+                table.insert(captured, prompt_data)
+            end,
+        }
+
+        local fake_chat = {
+            opts = { save_id = "chat-1", title = "My Chat" },
+            messages = {
+                { role = "user", content = "first prompt", opts = { visible = true }, _meta = { id = "m1" } },
+                { role = "llm", content = "reply", opts = { visible = true }, _meta = { id = "m2" } },
+            },
+        }
+
+        history:_maybe_save_prompt(fake_chat)
+
+        return { count = #captured, prompt_number = captured[1] and captured[1].prompt_number, content = captured[1] and captured[1].content, chat_id = captured[1] and captured[1].chat_id }
+    ]])
+    eq(1, result.count)
+    eq(1, result.prompt_number)
+    eq("first prompt", result.content)
+    eq("chat-1", result.chat_id)
+end
+
+T["Prompt capture"]["does not re-save on a second fire with no new user message (tool auto-submit)"] = function()
+    local result = child.lua([[
+        local History = require("codecompanion._extensions.history").History
+        local history = History.new({
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-prompt-unit-test",
+            summary = {},
+        })
+
+        local captured = {}
+        history.memory_provider = {
+            wants_prompt_capture = function() return true end,
+            save_prompt = function(prompt_data)
+                table.insert(captured, prompt_data)
+            end,
+        }
+
+        local fake_chat = {
+            opts = { save_id = "chat-2", title = "My Chat" },
+            messages = {
+                { role = "user", content = "first prompt", opts = { visible = true }, _meta = { id = "m1" } },
+            },
+        }
+
+        history:_maybe_save_prompt(fake_chat)
+        history:_maybe_save_prompt(fake_chat) -- ChatSubmitted refiring with unchanged messages
+
+        return { count = #captured }
+    ]])
+    eq(1, result.count)
+end
+
+T["Prompt capture"]["saves again once a genuinely new prompt is appended"] = function()
+    local result = child.lua([[
+        local History = require("codecompanion._extensions.history").History
+        local history = History.new({
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-prompt-unit-test",
+            summary = {},
+        })
+
+        local captured = {}
+        history.memory_provider = {
+            wants_prompt_capture = function() return true end,
+            save_prompt = function(prompt_data)
+                table.insert(captured, prompt_data)
+            end,
+        }
+
+        local fake_chat = {
+            opts = { save_id = "chat-3", title = "My Chat" },
+            messages = {
+                { role = "user", content = "first prompt", opts = { visible = true }, _meta = { id = "m1" } },
+            },
+        }
+
+        history:_maybe_save_prompt(fake_chat)
+
+        table.insert(fake_chat.messages, { role = "llm", content = "reply", opts = { visible = true }, _meta = { id = "m2" } })
+        table.insert(fake_chat.messages, { role = "user", content = "second prompt", opts = { visible = true }, _meta = { id = "m3" } })
+        history:_maybe_save_prompt(fake_chat)
+
+        return { count = #captured, second_number = captured[2] and captured[2].prompt_number, second_content = captured[2] and captured[2].content }
+    ]])
+    eq(2, result.count)
+    eq(2, result.second_number)
+    eq("second prompt", result.second_content)
+end
+
+T["Prompt capture"]["does nothing when wants_prompt_capture() is false"] = function()
+    local result = child.lua([[
+        local History = require("codecompanion._extensions.history").History
+        local history = History.new({
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-prompt-unit-test",
+            summary = {},
+        })
+
+        local captured = {}
+        history.memory_provider = {
+            wants_prompt_capture = function() return false end,
+            save_prompt = function(prompt_data)
+                table.insert(captured, prompt_data)
+            end,
+        }
+
+        local fake_chat = {
+            opts = { save_id = "chat-4" },
+            messages = {
+                { role = "user", content = "prompt", opts = { visible = true }, _meta = { id = "m1" } },
+            },
+        }
+
+        history:_maybe_save_prompt(fake_chat)
+
+        return { count = #captured }
+    ]])
+    eq(0, result.count)
+end
+
+T["Prompt capture"]["does nothing when the provider has no save_prompt (e.g. the vectorcode shim)"] = function()
+    local result = child.lua([[
+        local History = require("codecompanion._extensions.history").History
+        local history = History.new({
+            dir_to_save = vim.fn.stdpath("data") .. "/codecompanion-history-prompt-unit-test",
+            summary = {},
+        })
+
+        history.memory_provider = {
+            wants_context_injection = function() return false end,
+        }
+
+        local fake_chat = {
+            opts = { save_id = "chat-5" },
+            messages = {
+                { role = "user", content = "prompt", opts = { visible = true }, _meta = { id = "m1" } },
+            },
+        }
+
+        local ok = pcall(function()
+            history:_maybe_save_prompt(fake_chat)
+        end)
+
+        return { ok = ok }
+    ]])
+    eq(true, result.ok)
+end
+
 T["Context injection"] = new_set()
 
 T["Context injection"]["injects context into the chat when the provider opts in"] = function()

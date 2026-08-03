@@ -263,6 +263,29 @@ function M.delete_file(file_path)
 
     return { ok = true, error = nil }
 end
+---Real user prompts among a chat's messages: excludes injected context
+---(`opts.visible == false`), slash-command/variable references (`opts.tag`,
+---`opts.context_id`, `opts.reference`, `_meta.tag`, `context`), and blank content.
+---@param messages CodeCompanion.History.ChatMessage[]
+---@return {text: string, id: any}[]
+function M.visible_user_prompts(messages)
+    local config = require("codecompanion.config")
+    local prompts = {}
+    for _, msg in ipairs(messages or {}) do
+        if msg.role == config.constants.USER_ROLE and (not msg.opts or msg.opts.visible ~= false) then
+            local opts = msg.opts or {}
+            local meta = msg._meta or {}
+            if not opts.tag and not opts.context_id and not opts.reference and not meta.tag and not msg.context then
+                local text = vim.trim(M.message_text(msg.content))
+                if text ~= "" then
+                    table.insert(prompts, { text = text, id = meta.id })
+                end
+            end
+        end
+    end
+    return prompts
+end
+
 ---Find project root by looking for common project markers
 ---@param start_path? string Starting path (defaults to cwd)
 ---@return string project_root

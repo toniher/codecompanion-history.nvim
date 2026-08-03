@@ -658,6 +658,236 @@ T["auto_start_worker via _request()"]["attempts to start only once per session a
     eq(false, result.r2_ok)
 end
 
+T["wants_prompt_capture()"] = new_set()
+
+T["wants_prompt_capture()"]["false by default"] = function()
+    local result = child.lua([[
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp" } })
+        return claude_mem.wants_prompt_capture()
+    ]])
+    eq(false, result)
+end
+
+T["wants_prompt_capture()"]["true when prompts.enabled = true"] = function()
+    local result = child.lua([[
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp", prompts = { enabled = true } } })
+        return claude_mem.wants_prompt_capture()
+    ]])
+    eq(true, result)
+end
+
+T["save_prompt()"] = new_set()
+
+T["save_prompt()"]["posts /api/import with one session and one prompt entry"] = function()
+    local import_stub = read_stub("claude_mem_import.json")
+    local result = child.lua(
+        [[
+        local import_stub = ...
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp", prompts = { enabled = true } } })
+
+        local captured
+        claude_mem._request = function(method, path, opts, cb)
+            captured = { method = method, path = path, body = opts.body }
+            cb({ ok = true, data = vim.json.decode(import_stub) })
+        end
+
+        claude_mem.save_prompt({
+            chat_id = "1785768156",
+            chat_title = "My Chat",
+            project_root = "/home/user/projects/codecompanion-history.nvim",
+            prompt_number = 1,
+            content = "How would it be possible to store input user prompts?",
+            timestamp = 1785768156,
+        })
+
+        return captured
+    ]],
+        { import_stub }
+    )
+
+    eq("POST", result.method)
+    eq("/api/import", result.path)
+    eq(1, #result.body.sessions)
+    eq(1, #result.body.prompts)
+
+    local session = result.body.sessions[1]
+    eq("codecompanion-1785768156", session.content_session_id)
+    eq("codecompanion-history.nvim", session.project)
+    eq("codecompanion", session.platform_source)
+    eq("completed", session.status)
+    eq("How would it be possible to store input user prompts?", session.user_prompt)
+
+    local prompt = result.body.prompts[1]
+    eq("codecompanion-1785768156", prompt.content_session_id)
+    eq("codecompanion", prompt.platform_source)
+    eq(1, prompt.prompt_number)
+    eq("How would it be possible to store input user prompts?", prompt.prompt_text)
+    eq(1785768156000, prompt.created_at_epoch)
+end
+
+T["save_prompt()"]["strips <private> and <system-reminder> blocks before sending"] = function()
+    local import_stub = read_stub("claude_mem_import.json")
+    local result = child.lua(
+        [[
+        local import_stub = ...
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp", prompts = { enabled = true } } })
+
+        local captured
+        claude_mem._request = function(method, path, opts, cb)
+            captured = opts.body
+            cb({ ok = true, data = vim.json.decode(import_stub) })
+        end
+
+        claude_mem.save_prompt({
+            chat_id = "1",
+            project_root = "/tmp/repo",
+            prompt_number = 1,
+            content = "keep this<private>drop this</private> and keep this<system-reminder>drop too</system-reminder>end",
+            timestamp = 1700000000,
+        })
+
+        return captured
+    ]],
+        { import_stub }
+    )
+    eq("keep this and keep thisend", result.prompts[1].prompt_text)
+end
+
+T["save_prompt()"]["truncates text over max_chars ending in an ellipsis"] = function()
+    local import_stub = read_stub("claude_mem_import.json")
+    local result = child.lua(
+        [[
+        local import_stub = ...
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp", prompts = { enabled = true, max_chars = 10 } } })
+
+        local captured
+        claude_mem._request = function(method, path, opts, cb)
+            captured = opts.body
+            cb({ ok = true, data = vim.json.decode(import_stub) })
+        end
+
+        claude_mem.save_prompt({
+            chat_id = "1",
+            project_root = "/tmp/repo",
+            prompt_number = 1,
+            content = "0123456789ABCDEF",
+            timestamp = 1700000000,
+        })
+
+        return captured.prompts[1].prompt_text
+    ]],
+        { import_stub }
+    )
+    eq("012345678", result:sub(1, 9))
+    eq(10, vim.fn.strcharlen(result))
+    eq("…", result:sub(-3))
+end
+
+T["save_prompt()"]["issues no request when the prompt is empty after stripping"] = function()
+    local result = child.lua([[
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp", prompts = { enabled = true } } })
+
+        local called = false
+        claude_mem._request = function(method, path, opts, cb)
+            called = true
+        end
+
+        claude_mem.save_prompt({
+            chat_id = "1",
+            project_root = "/tmp/repo",
+            prompt_number = 1,
+            content = "<private>only private content</private>",
+            timestamp = 1700000000,
+        })
+
+        return called
+    ]])
+    eq(false, result)
+end
+
+T["memory tool"]["scope = prompts calls /api/search with type=prompts and renders results"] = function()
+    local prompts_stub = read_stub("claude_mem_search_prompts.json")
+    local result = child.lua(
+        [[
+        local prompts_stub = ...
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp" } })
+
+        local captured
+        claude_mem._request = function(method, path, opts, cb)
+            captured = { method = method, path = path, query = opts.query }
+            cb({ ok = true, data = vim.json.decode(prompts_stub) })
+        end
+
+        local tool = claude_mem.make_memory_tool({ default_num = 10 })
+        local msg
+        tool.cmds[1](nil, { keywords = { "claude-mem" }, scope = "prompts" }, {
+            output_cb = function(m)
+                msg = m
+            end,
+        })
+        vim.wait(200, function()
+            return msg ~= nil
+        end)
+
+        local outputs = {}
+        local fake_chat = {
+            add_tool_output = function(_, tool_self, content, user_message)
+                table.insert(outputs, { content = content, user_message = user_message })
+            end,
+        }
+        tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })
+
+        return {
+            method = captured.method,
+            path = captured.path,
+            query_type = captured.query.type,
+            query_format = captured.query.format,
+            mode = msg.data.mode,
+            output_contains = outputs[1] and outputs[1].content:find("store input user prompts") ~= nil,
+        }
+    ]],
+        { prompts_stub }
+    )
+
+    eq("GET", result.method)
+    eq("/api/search", result.path)
+    eq("prompts", result.query_type)
+    eq("json", result.query_format)
+    eq("prompts", result.mode)
+    eq(true, result.output_contains)
+end
+
+T["memory tool"]["scope = prompts with 0 results reports 0 prompts found"] = function()
+    local result = child.lua([[
+        claude_mem.setup({ claude_mem = { data_dir = "/tmp" } })
+        claude_mem._request = function(method, path, opts, cb)
+            cb({ ok = true, data = { observations = {}, sessions = {}, prompts = {}, totalResults = 0 } })
+        end
+
+        local tool = claude_mem.make_memory_tool({ default_num = 10 })
+        local msg
+        tool.cmds[1](nil, { keywords = { "nothing" }, scope = "prompts" }, {
+            output_cb = function(m)
+                msg = m
+            end,
+        })
+        vim.wait(200, function()
+            return msg ~= nil
+        end)
+
+        local outputs = {}
+        local fake_chat = {
+            add_tool_output = function(_, tool_self, content, user_message)
+                table.insert(outputs, content)
+            end,
+        }
+        tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })
+
+        return outputs[1]
+    ]])
+    eq(true, result:find("0 prompts") ~= nil)
+end
+
 T["auto_start_worker via _request()"]["never attempts to start the worker when the flag is off"] = function()
     local result = child.lua([[
         claude_mem.setup({ claude_mem = { data_dir = "/tmp", auto_start_worker = false } })

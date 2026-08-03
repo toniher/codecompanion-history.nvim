@@ -1,0 +1,18 @@
+{
+    "observations": [],
+    "sessions": [],
+    "prompts": [
+        {
+            "id": 378,
+            "content_session_id": "codecompanion-1785768156",
+            "project": "codecompanion-history.nvim",
+            "platform_source": "codecompanion",
+            "prompt_number": 1,
+            "prompt_text": "How would it be possible to store input user prompts when use claude-mem?",
+            "created_at": "2026-08-03T14:42:36.514Z",
+            "created_at_epoch": 1785768156514
+        }
+    ],
+    "totalResults": 1,
+    "query": "claude-mem"
+}

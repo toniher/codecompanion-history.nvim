@@ -8,6 +8,8 @@
 ---@field make_memory_tool fun(tool_opts: CodeCompanion.History.MemoryTool.Opts): CodeCompanion.Agent.Tool|{}
 ---@field wants_context_injection fun(): boolean
 ---@field get_context (fun(project_root: string, cb: fun(context: string?)))?
+---@field wants_prompt_capture (fun(): boolean)?
+---@field save_prompt (fun(prompt_data: CodeCompanion.History.PromptData))?
 
 local M = {}
 

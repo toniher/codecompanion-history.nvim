@@ -140,6 +140,10 @@ return {
             adapter = "test_adapter",
             variables = {},
         },
+
+        code_review = {
+            enabled = false,
+        },
     },
     prompt_library = {
         ["Demo"] = {

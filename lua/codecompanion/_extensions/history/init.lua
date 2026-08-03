@@ -116,6 +116,10 @@ local default_opts = {
             inject_limit = 5,
             auto_start_worker = false,
             auto_start_timeout_ms = 15000,
+            prompts = {
+                enabled = false,
+                max_chars = 4000,
+            },
         },
     },
     ---Filter function for browsing chats (defaults to show all chats)
@@ -247,6 +251,8 @@ function History:_setup_autocommands()
                 return
             end
 
+            self:_maybe_save_prompt(chat)
+
             -- Handle title generation/refresh
             local should_generate, is_refresh = self.title_generator:should_generate(chat)
             if should_generate then
@@ -337,6 +343,39 @@ function History:_maybe_inject_memory_context(chat)
             )
         end
     end)
+end
+
+---Push the latest submitted user prompt to the memory provider, if it opts in.
+---Guards against `ChatSubmitted` re-firing on tool auto-submit (no new user message added).
+---@param chat CodeCompanion.History.Chat
+function History:_maybe_save_prompt(chat)
+    local provider = self.memory_provider
+    if not provider or not provider.save_prompt or not provider.wants_prompt_capture() then
+        return
+    end
+
+    local prompts = utils.visible_user_prompts(chat.messages or {})
+    local latest = prompts[#prompts]
+    if not latest then
+        return
+    end
+
+    local save_id = chat.opts.save_id
+    self._last_saved_prompt = self._last_saved_prompt or {}
+    local seen = self._last_saved_prompt[save_id]
+    if seen and seen.number == #prompts and seen.id == latest.id then
+        return
+    end
+    self._last_saved_prompt[save_id] = { number = #prompts, id = latest.id }
+
+    pcall(provider.save_prompt, {
+        chat_id = save_id,
+        chat_title = chat.opts.title,
+        project_root = utils.find_project_root(),
+        prompt_number = #prompts,
+        content = latest.text,
+        timestamp = os.time(),
+    })
 end
 
 ---@param chat? CodeCompanion.History.Chat

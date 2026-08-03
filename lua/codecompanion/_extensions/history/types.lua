@@ -18,10 +18,16 @@
 ---@class CodeCompanion.History.MemoryTool.Args
 ---@field keywords string[]
 ---@field count integer
+---@field ids? integer[]
+---@field scope? "observations"|"prompts"
 
 --- The tool options specified by the user
 ---@class CodeCompanion.History.MemoryTool.Opts
 ---@field default_num integer
+
+---@class CodeCompanion.History.ClaudeMemPromptOpts
+---@field enabled? boolean Store each submitted user prompt in claude-mem's `user_prompts` table (default: false)
+---@field max_chars? number Truncate stored prompt text beyond this length (default: 4000)
 
 ---@class CodeCompanion.History.ClaudeMemOpts
 ---@field host? string Worker host (default: "127.0.0.1", or $CLAUDE_MEM_WORKER_HOST / settings.json)
@@ -34,6 +40,15 @@
 ---@field inject_limit? number Number of recent context items to inject (default: 5)
 ---@field auto_start_worker? boolean Try to start the claude-mem worker if it isn't reachable (default: false)
 ---@field auto_start_timeout_ms? number Timeout for the auto-start command (default: 15000)
+---@field prompts? CodeCompanion.History.ClaudeMemPromptOpts Options for storing individual user prompts
+
+---@class CodeCompanion.History.PromptData
+---@field chat_id string
+---@field chat_title? string
+---@field project_root? string
+---@field prompt_number number
+---@field content string
+---@field timestamp number Unix timestamp (seconds)
 
 ---@class CodeCompanion.History.MemoryOpts
 ---@field provider? "vectorcode"|"claude-mem" Memory backend to use (nil to auto-resolve)

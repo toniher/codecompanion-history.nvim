@@ -17,6 +17,7 @@ local utils = require("codecompanion._extensions.history.utils")
 ---@field inject_limit number
 ---@field auto_start_worker boolean
 ---@field auto_start_timeout_ms number
+---@field prompts CodeCompanion.History.ClaudeMemPromptOpts
 
 ---@class CodeCompanion.History.ClaudeMem
 ---@field opts CodeCompanion.History.ClaudeMemResolvedOpts
@@ -32,6 +33,10 @@ local M = {
         inject_limit = 5,
         auto_start_worker = false,
         auto_start_timeout_ms = 15000,
+        prompts = {
+            enabled = false,
+            max_chars = 4000,
+        },
     },
     notify = true,
 }
@@ -84,6 +89,10 @@ function M.setup(memory_opts)
         inject_limit = claude_mem_opts.inject_limit or 5,
         auto_start_worker = claude_mem_opts.auto_start_worker or false,
         auto_start_timeout_ms = claude_mem_opts.auto_start_timeout_ms or 15000,
+        prompts = {
+            enabled = (claude_mem_opts.prompts and claude_mem_opts.prompts.enabled) or false,
+            max_chars = (claude_mem_opts.prompts and claude_mem_opts.prompts.max_chars) or 4000,
+        },
     }
 end
 
@@ -128,6 +137,42 @@ local function encode_query(query)
         end
     end
     return "?" .. table.concat(parts, "&")
+end
+
+-- Tags claude-mem's own privacy stripper removes wholesale before storing a prompt;
+-- mirrored here since `/api/import` (unlike `/api/sessions/init`) applies no stripping itself.
+local PRIVACY_TAGS = {
+    "private",
+    "claude%-mem%-context",
+    "system_instruction",
+    "system%-instruction",
+    "persisted%-output",
+    "system%-reminder",
+}
+
+---Strip whole `<tag>...</tag>` blocks for claude-mem's known privacy tags, trim, and
+---cap length. Returns nil when nothing survives (mirrors claude-mem's `reason = "private"` skip).
+---@param text string
+---@param max_chars number
+---@return string?
+local function sanitize_prompt(text, max_chars)
+    for _, tag in ipairs(PRIVACY_TAGS) do
+        text = text:gsub("<" .. tag .. ">.-</" .. tag .. ">", "")
+    end
+    text = vim.trim(text)
+    if text == "" then
+        return nil
+    end
+    if vim.fn.strcharlen(text) > max_chars then
+        text = vim.fn.strcharpart(text, 0, math.max(0, max_chars - 1)) .. "…"
+    end
+    return text
+end
+
+---@param unix_seconds number
+---@return string
+local function iso8601(unix_seconds)
+    return os.date("!%Y-%m-%dT%H:%M:%S.000Z", unix_seconds)
 end
 
 ---Parse a `MAJOR.MINOR.PATCH`-style directory name into a comparable version
@@ -309,6 +354,7 @@ function M.make_memory_tool(opts)
                 Use this tool when users mentioned a previous conversation, or when you feel like you can make use of previous chats.
                 Call it with `keywords` to search for relevant memories; each result carries an id.
                 Call it again with `ids` (from a prior search) to unfold the full detail of specific memories.
+                Set `scope` to "prompts" to search the raw text of previously submitted prompts instead of distilled summaries.
                 ]],
                 parameters = {
                     type = "object",
@@ -329,6 +375,11 @@ function M.make_memory_tool(opts)
                             type = "array",
                             items = { type = "integer" },
                             description = "Memory ids to unfold into full detail. Use ids returned by a previous search call.",
+                        },
+                        scope = {
+                            type = "string",
+                            enum = { "observations", "prompts" },
+                            description = "Which kind of memory to search: 'observations' (default) for distilled past-conversation summaries, or 'prompts' for the raw text of previously submitted prompts.",
                         },
                     },
                     additionalProperties = false,
@@ -367,6 +418,27 @@ function M.make_memory_tool(opts)
 
                 local query_text = table.concat(action.keywords, " ")
                 local limit = action.count or opts.default_num
+
+                if action.scope == "prompts" then
+                    M._request("GET", "/api/search", {
+                        query = {
+                            query = query_text,
+                            type = "prompts",
+                            format = "json",
+                            limit = limit,
+                            project = project,
+                        },
+                    }, function(result)
+                        if not result.ok then
+                            return cb({ status = "error", data = result.error })
+                        end
+                        cb({
+                            status = "success",
+                            data = { mode = "prompts", items = result.data and result.data.prompts },
+                        })
+                    end)
+                    return
+                end
 
                 if M.opts.search == "semantic" then
                     M._request(
@@ -433,6 +505,32 @@ function M.make_memory_tool(opts)
                         }, "\n")
                         chat:add_tool_output(self, string.format("<memory>\n%s\n</memory>", body), user_message)
                     end
+                    return
+                end
+
+                if payload.mode == "prompts" then
+                    local items = payload.items
+                    if not items or #items == 0 then
+                        chat:add_tool_output(self, "The memory tool found 0 prompts.")
+                        return
+                    end
+                    local lines = {}
+                    for _, item in ipairs(items) do
+                        table.insert(
+                            lines,
+                            string.format(
+                                "#%s [%s] %s",
+                                tostring(item.id),
+                                item.created_at or "",
+                                item.prompt_text or ""
+                            )
+                        )
+                    end
+                    chat:add_tool_output(
+                        self,
+                        string.format("<memory>\n%s\n</memory>", table.concat(lines, "\n")),
+                        "Retrieved prompts."
+                    )
                     return
                 end
 
@@ -517,6 +615,71 @@ end
 ---@return boolean
 function M.wants_context_injection()
     return M.opts.inject_context_on_new_chat == true
+end
+
+---Whether the user opted in to storing individual submitted prompts
+---@return boolean
+function M.wants_prompt_capture()
+    return M.opts.prompts.enabled == true
+end
+
+---Push a submitted user prompt to claude-mem via `POST /api/import`.
+---Deliberately not `/api/sessions/init`: that route also spawns claude-mem's own
+---observer agent (a real LLM call per chat), which `/api/import` avoids entirely.
+---@param prompt_data CodeCompanion.History.PromptData
+function M.save_prompt(prompt_data)
+    local text = sanitize_prompt(prompt_data.content, M.opts.prompts.max_chars)
+    if not text then
+        return
+    end
+
+    local content_session_id = "codecompanion-" .. prompt_data.chat_id
+    local project = project_key(prompt_data.project_root)
+    local timestamp = iso8601(prompt_data.timestamp)
+    local epoch = prompt_data.timestamp * 1000
+
+    M._request("POST", "/api/import", {
+        body = {
+            sessions = {
+                {
+                    content_session_id = content_session_id,
+                    memory_session_id = vim.NIL,
+                    project = project,
+                    platform_source = "codecompanion",
+                    user_prompt = text,
+                    started_at = timestamp,
+                    started_at_epoch = epoch,
+                    completed_at = timestamp,
+                    completed_at_epoch = epoch,
+                    -- "completed" (not "active") keeps this out of the
+                    -- Request:-style rendering `GET /api/context/recent` gives
+                    -- active, summary-less sessions.
+                    status = "completed",
+                },
+            },
+            prompts = {
+                {
+                    content_session_id = content_session_id,
+                    platform_source = "codecompanion",
+                    prompt_number = prompt_data.prompt_number,
+                    prompt_text = text,
+                    created_at = timestamp,
+                    created_at_epoch = epoch,
+                },
+            },
+        },
+    }, function(result)
+        if not result.ok then
+            log:error(
+                "[claude-mem] Failed to import prompt #%s for %s: %s",
+                prompt_data.prompt_number,
+                content_session_id,
+                result.error
+            )
+            return
+        end
+        log:debug("[claude-mem] Imported prompt #%s for %s", prompt_data.prompt_number, content_session_id)
+    end)
 end
 
 ---Fetch claude-mem's recent-context markdown block for a project

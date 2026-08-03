@@ -103,4 +103,72 @@ T["format_relative_time"]["handles a missing timestamp"] = function()
     eq("?", child.lua_get([[utils.format_relative_time(nil)]]))
 end
 
+T["visible_user_prompts"] = new_set()
+
+T["visible_user_prompts"]["keeps real prompts in order, with their _meta.id"] = function()
+    local result = child.lua([[
+        local config = require("codecompanion.config")
+        local messages = {
+            { role = config.constants.USER_ROLE, content = "first", opts = { visible = true }, _meta = { id = "a" } },
+            { role = config.constants.LLM_ROLE, content = "reply", opts = { visible = true }, _meta = { id = "b" } },
+            { role = config.constants.USER_ROLE, content = "second", opts = { visible = true }, _meta = { id = "c" } },
+        }
+        return utils.visible_user_prompts(messages)
+    ]])
+    eq(2, #result)
+    eq("first", result[1].text)
+    eq("a", result[1].id)
+    eq("second", result[2].text)
+    eq("c", result[2].id)
+end
+
+T["visible_user_prompts"]["drops invisible context messages"] = function()
+    local result = child.lua([[
+        local config = require("codecompanion.config")
+        local messages = {
+            { role = config.constants.USER_ROLE, content = "real prompt", opts = { visible = true } },
+            {
+                role = config.constants.USER_ROLE,
+                content = "injected context",
+                opts = { visible = false },
+                context = { id = "claude-mem-recent" },
+                _meta = { tag = "claude-mem" },
+            },
+        }
+        return utils.visible_user_prompts(messages)
+    ]])
+    eq(1, #result)
+    eq("real prompt", result[1].text)
+end
+
+T["visible_user_prompts"]["drops tagged, context_id and reference messages"] = function()
+    local result = child.lua([[
+        local config = require("codecompanion.config")
+        local messages = {
+            { role = config.constants.USER_ROLE, content = "real prompt", opts = { visible = true } },
+            { role = config.constants.USER_ROLE, content = "slash command", opts = { visible = true, tag = "from_config" } },
+            { role = config.constants.USER_ROLE, content = "file ref", opts = { visible = true, context_id = "buf1" } },
+            { role = config.constants.USER_ROLE, content = "variable ref", opts = { visible = true, reference = "@foo" } },
+            { role = config.constants.USER_ROLE, content = "meta tagged", opts = { visible = true }, _meta = { tag = "system" } },
+        }
+        return utils.visible_user_prompts(messages)
+    ]])
+    eq(1, #result)
+    eq("real prompt", result[1].text)
+end
+
+T["visible_user_prompts"]["drops empty or whitespace-only content"] = function()
+    local result = child.lua([[
+        local config = require("codecompanion.config")
+        local messages = {
+            { role = config.constants.USER_ROLE, content = "   ", opts = { visible = true } },
+            { role = config.constants.USER_ROLE, content = "", opts = { visible = true } },
+            { role = config.constants.USER_ROLE, content = "real", opts = { visible = true } },
+        }
+        return utils.visible_user_prompts(messages)
+    ]])
+    eq(1, #result)
+    eq("real", result[1].text)
+end
+
 return T

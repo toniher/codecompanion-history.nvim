@@ -1,0 +1,13 @@
+{
+    "success": true,
+    "stats": {
+        "sessionsImported": 1,
+        "sessionsSkipped": 0,
+        "summariesImported": 0,
+        "summariesSkipped": 0,
+        "observationsImported": 0,
+        "observationsSkipped": 0,
+        "promptsImported": 1,
+        "promptsSkipped": 0
+    }
+}
