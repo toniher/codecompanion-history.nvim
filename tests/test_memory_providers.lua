@@ -327,8 +327,8 @@ T["Context injection"]["injects context into the chat when the provider opts in"
 
         local captured = {}
         local fake_chat = {
-            add_context = function(self, data, source, id, opts)
-                table.insert(captured, { content = data.content, source = source, id = id, opts = opts })
+		add_context = function(self, data, opts)
+			table.insert(captured, { content = data.content, source = opts.source, id = opts.id, opts = opts })
             end,
         }
 
@@ -364,8 +364,8 @@ T["Context injection"]["does nothing when the provider has no get_context"] = fu
 
         local captured = {}
         local fake_chat = {
-            add_context = function(self, data, source, id, opts)
-                table.insert(captured, { source = source })
+		add_context = function(self, data, opts)
+			table.insert(captured, { source = opts.source })
             end,
         }
 
@@ -395,8 +395,8 @@ T["Context injection"]["does nothing when wants_context_injection() is false"] =
 
         local captured = {}
         local fake_chat = {
-            add_context = function(self, data, source, id, opts)
-                table.insert(captured, { source = source })
+		add_context = function(self, data, opts)
+			table.insert(captured, { source = opts.source })
             end,
         }
 

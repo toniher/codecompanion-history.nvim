@@ -374,6 +374,7 @@ function M.make_memory_tool(opts)
                         ids = {
                             type = "array",
                             items = { type = "integer" },
+                            maxItems = 100,
                             description = "Memory ids to unfold into full detail. Use ids returned by a previous search call.",
                         },
                         scope = {
@@ -396,9 +397,9 @@ function M.make_memory_tool(opts)
 
                 if vim.islist(action.ids or {}) and #(action.ids or {}) > 0 then
                     M._request(
-                        "GET",
-                        "/api/observations",
-                        { query = { ids = table.concat(action.ids, ",") } },
+                        "POST",
+                        "/api/observations/batch",
+                        { body = { ids = action.ids, project = project } },
                         function(result)
                             if not result.ok then
                                 return cb({ status = "error", data = result.error })
@@ -471,17 +472,16 @@ function M.make_memory_tool(opts)
             ---@param agent CodeCompanion.Tools
             error = function(self, agent, cmd, stderr)
                 local errors = vim.iter(stderr):flatten():join("\n")
-                agent.chat:add_tool_output(
-                    self,
-                    string.format(
+                agent.chat:add_tool_output(self, {
+                    content = string.format(
                         [[**Memory Tool**: Ran with an error:
 
 ````txt
 %s
 ````]],
                         errors
-                    )
-                )
+                    ),
+                })
             end,
             ---@param agent CodeCompanion.Tools
             success = function(self, agent, cmd, stdout)
@@ -492,18 +492,17 @@ function M.make_memory_tool(opts)
                 if payload.mode == "unfold" then
                     local items = payload.items
                     if not items or (vim.islist(items) and #items == 0) then
-                        chat:add_tool_output(self, "No memories found for the given ids.")
+                        chat:add_tool_output(self, { content = "No memories found for the given ids." })
                         return
                     end
                     local list = vim.islist(items) and items or { items }
-                    for i, item in ipairs(list) do
-                        local user_message = i == 1 and string.format("Unfolded %d memories.", #list) or ""
+                    for _, item in ipairs(list) do
                         local body = table.concat({
                             item.title and ("Title: " .. item.title) or nil,
                             item.subtitle and ("Subtitle: " .. item.subtitle) or nil,
                             item.narrative or item.facts or "",
                         }, "\n")
-                        chat:add_tool_output(self, string.format("<memory>\n%s\n</memory>", body), user_message)
+                        chat:add_tool_output(self, { content = string.format("<memory>\n%s\n</memory>", body) })
                     end
                     return
                 end
@@ -511,7 +510,7 @@ function M.make_memory_tool(opts)
                 if payload.mode == "prompts" then
                     local items = payload.items
                     if not items or #items == 0 then
-                        chat:add_tool_output(self, "The memory tool found 0 prompts.")
+                        chat:add_tool_output(self, { content = "The memory tool found 0 prompts." })
                         return
                     end
                     local lines = {}
@@ -528,8 +527,7 @@ function M.make_memory_tool(opts)
                     end
                     chat:add_tool_output(
                         self,
-                        string.format("<memory>\n%s\n</memory>", table.concat(lines, "\n")),
-                        "Retrieved prompts."
+                        { content = string.format("<memory>\n%s\n</memory>", table.concat(lines, "\n")) }
                     )
                     return
                 end
@@ -540,10 +538,10 @@ function M.make_memory_tool(opts)
                     and payload.result.content[1]
                     and payload.result.content[1].text
                 if not text or text == "" then
-                    chat:add_tool_output(self, "The memory tool found 0 memories.")
+                    chat:add_tool_output(self, { content = "The memory tool found 0 memories." })
                     return
                 end
-                chat:add_tool_output(self, string.format("<memory>\n%s\n</memory>", text), "Retrieved memories.")
+                chat:add_tool_output(self, { content = string.format("<memory>\n%s\n</memory>", text) })
             end,
         },
     }
@@ -559,7 +557,7 @@ local function save_summary(summary_data)
             project = project_key(summary_data.project_root),
             metadata = {
                 source = "codecompanion-history",
-                platform_source = "codecompanion",
+                platformSource = "codecompanion",
                 save_id = summary_data.chat_id,
                 summary_id = summary_data.summary_id,
                 generated_at = summary_data.generated_at,

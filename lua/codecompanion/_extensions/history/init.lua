@@ -333,14 +333,11 @@ function History:_maybe_inject_memory_context(chat)
     local project_root = utils.find_project_root()
     pcall(provider.get_context, project_root, function(context)
         if context and context ~= "" then
-            pcall(
-                chat.add_context,
-                chat,
-                { content = context },
-                "claude-mem",
-                "claude-mem-recent-" .. project_root,
-                { visible = false }
-            )
+            pcall(chat.add_context, chat, { content = context }, {
+                source = "claude-mem",
+                id = "claude-mem-recent-" .. project_root,
+                visible = false,
+            })
         end
     end)
 end

@@ -49,8 +49,10 @@ end
 
 T["setup()"]["falls back to defaults when nothing is configured"] = function()
     local result = child.lua([[
-        claude_mem.setup({})
-        return {
+local data_dir = vim.fn.tempname()
+vim.fn.mkdir(data_dir, "p")
+claude_mem.setup({ claude_mem = { data_dir = data_dir } })
+return {
             host = claude_mem.opts.host,
             port = claude_mem.opts.port,
             search = claude_mem.opts.search,
@@ -113,8 +115,8 @@ T["memory tool"]["search mode calls _request with query/limit/project and return
 
         local outputs = {}
         local fake_chat = {
-            add_tool_output = function(_, tool_self, content, user_message)
-                table.insert(outputs, { content = content, user_message = user_message })
+            add_tool_output = function(_, tool_self, opts)
+                table.insert(outputs, { content = opts.content })
             end,
         }
         tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })
@@ -186,24 +188,27 @@ T["memory tool"]["ids mode unfolds observations"] = function()
 
         local outputs = {}
         local fake_chat = {
-            add_tool_output = function(_, tool_self, content, user_message)
-                table.insert(outputs, { content = content, user_message = user_message })
+            add_tool_output = function(_, tool_self, opts)
+                table.insert(outputs, { content = opts.content })
             end,
         }
         tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })
 
-        return {
-            path = captured.path,
-            ids_query = captured.opts.query.ids,
-            mode = msg.data.mode,
+return {
+	method = captured.method,
+	path = captured.path,
+	body = captured.opts.body,
+	mode = msg.data.mode,
             output_contains = outputs[1] and outputs[1].content:find("Split init.lua") ~= nil,
         }
     ]],
         { observations_stub }
     )
 
-    eq("/api/observations", result.path)
-    eq("42", result.ids_query)
+    eq("POST", result.method)
+    eq("/api/observations/batch", result.path)
+    eq({ 42 }, result.body.ids)
+    eq("codecompanion-history.nvim", result.body.project)
     eq("unfold", result.mode)
     eq(true, result.output_contains)
 end
@@ -266,7 +271,7 @@ T["index()"]["saves a single summary via POST /api/memory/save with the right pr
     eq("My Chat", result.body.title)
     eq("codecompanion-history.nvim", result.body.project)
     eq("codecompanion-history", result.body.metadata.source)
-    eq("codecompanion", result.body.metadata.platform_source)
+    eq("codecompanion", result.body.metadata.platformSource)
     eq("chat-1", result.body.metadata.save_id)
     eq("sum-1", result.body.metadata.summary_id)
 end
@@ -831,8 +836,8 @@ T["memory tool"]["scope = prompts calls /api/search with type=prompts and render
 
         local outputs = {}
         local fake_chat = {
-            add_tool_output = function(_, tool_self, content, user_message)
-                table.insert(outputs, { content = content, user_message = user_message })
+            add_tool_output = function(_, tool_self, opts)
+                table.insert(outputs, { content = opts.content })
             end,
         }
         tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })
@@ -877,8 +882,8 @@ T["memory tool"]["scope = prompts with 0 results reports 0 prompts found"] = fun
 
         local outputs = {}
         local fake_chat = {
-            add_tool_output = function(_, tool_self, content, user_message)
-                table.insert(outputs, content)
+            add_tool_output = function(_, tool_self, opts)
+                table.insert(outputs, opts.content)
             end,
         }
         tool.output.success(tool, { chat = fake_chat }, nil, { msg.data })

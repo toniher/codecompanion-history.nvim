@@ -154,7 +154,7 @@ M.make_memory_tool = check_vectorcode_wrap(function(opts)
 ````]],
                     errors
                 )
-                chat:add_tool_output(self, error_output)
+                chat:add_tool_output(self, { content = error_output })
             end,
             ---@param agent CodeCompanion.Agent
             ---@param cmd table
@@ -164,18 +164,13 @@ M.make_memory_tool = check_vectorcode_wrap(function(opts)
                 stdout = stdout[1]
 
                 if #stdout == 0 then
-                    agent.chat:add_tool_output(self, "The memory tool found 0 memories.")
+                    agent.chat:add_tool_output(self, { content = "The memory tool found 0 memories." })
                     return
                 end
-                for i, result in ipairs(stdout) do
-                    local user_message = ""
-                    if i == 1 then
-                        user_message = string.format("Retrieved %d memories.", #stdout)
-                    end
+                for _, result in ipairs(stdout) do
                     agent.chat:add_tool_output(
                         self,
-                        string.format("<memory>\n%s\n</memory>", result.document),
-                        user_message
+                        { content = string.format("<memory>\n%s\n</memory>", result.document) }
                     )
                 end
             end,

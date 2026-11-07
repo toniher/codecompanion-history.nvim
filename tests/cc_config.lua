@@ -145,6 +145,7 @@ return {
             enabled = false,
         },
     },
+    integrations = {},
     prompt_library = {
         ["Demo"] = {
             interaction = "chat",
